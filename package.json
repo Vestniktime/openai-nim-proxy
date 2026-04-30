@@ -4,7 +4,7 @@
   "description": "OpenAI compatible proxy for NVIDIA NIM API",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js";,
+    "start": "node server.js",
   "vercel-build" : echo build complete;},
   "dependencies": {
     "express": "^4.18.2",
