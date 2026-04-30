@@ -82,11 +82,11 @@ app.post('/v1/chat/completions', async (req, res) => {
       if (!nimModel) {
         const modelLower = model.toLowerCase();
         if (modelLower.includes('gpt-4') || modelLower.includes('claude-opus') || modelLower.includes('405b')) {
-          nimModel = 'meta/llama-3.1-405b-instruct';
+          nimModel = 'deepseek-ai/deepseek-v4-pro';
         } else if (modelLower.includes('claude') || modelLower.includes('gemini') || modelLower.includes('70b')) {
-          nimModel = 'meta/llama-3.1-70b-instruct';
+          nimModel = 'deepseek-ai/deepseek-v4-pro';
         } else {
-          nimModel = 'meta/llama-3.1-8b-instruct';
+          nimModel = 'deepseek-ai/deepseek-v4-pro';
         }
       }
     }
@@ -237,14 +237,9 @@ app.all('*', (req, res) => {
   });
 });
 
-if (process.env.NODE_ENV !== 'production') {
-
 app.listen(PORT, () => {
-
-console.log(`Proxy running on port ${PORT}`);
-
+  console.log(`OpenAI to NVIDIA NIM Proxy running on port ${PORT}`);
+  console.log(`Health check: http://localhost:${PORT}/health`);
+  console.log(`Reasoning display: ${SHOW_REASONING ? 'ENABLED' : 'DISABLED'}`);
+  console.log(`Thinking mode: ${ENABLE_THINKING_MODE ? 'ENABLED' : 'DISABLED'}`);
 });
-
-}
-
-module.exports = app;
