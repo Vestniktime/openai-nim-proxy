@@ -36,11 +36,11 @@ const MODELS = [
     defaultTokens: 8192,
   },
   {
-    nimId:         'qwen/qwen3-235b-a22b-instruct-2507',
-    aliases:       ['qwen3-235b', 'qwen3.5-397b-a17b', 'gpt-3.5-turbo', 'claude-3-haiku'],
+    nimId:         'qwen/qwen3.5-397b-a17b',
+    aliases:       ['qwen3.5-397b-a17b', 'qwen3.5-397b-a17b', 'gpt-3.5-turbo', 'claude-3-haiku'],
     supportsThink: true,
     defaultTemp:   0.7,
-    defaultTokens: 8192,
+    defaultTokens: 16384,
   },
   {
     nimId:         'nvidia/llama-3.1-nemotron-ultra-253b-v1',
