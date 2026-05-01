@@ -33,7 +33,7 @@ const MODELS = [
     aliases:       ['deepseek-v4-pro', 'gpt-4o', 'gpt-4', 'gpt-4-turbo'],
     supportsThink: true,
     defaultTemp:   0.6,
-    defaultTokens: 8192,
+    defaultTokens: 16384,
   },
   {
     nimId:         'qwen/qwen3.5-397b-a17b',
@@ -50,11 +50,11 @@ const MODELS = [
     defaultTokens: 8192,
   },
   {
-    nimId:         'moonshotai/kimi-k2-instruct',
+    nimId:         'moonshotai/kimi-k2.6',
     aliases:       ['kimi-k2', 'claude-3-sonnet'],
-    supportsThink: false,
+    supportsThink: true,
     defaultTemp:   0.7,
-    defaultTokens: 8192,
+    defaultTokens: 16384,
   },
   {
     nimId:         'openai/gpt-oss-120b',
