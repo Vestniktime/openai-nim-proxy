@@ -46,6 +46,15 @@ const MODEL_REGISTRY = {
     aliases:     ['deepseek-v4-pro', 'deepseek-v4', 'gpt-4o', 'gpt-4'],
   },
 
+    'deepseek-ai/deepseek-v4-flash': {
+    nimId:       'deepseek-ai/deepseek-v4-flash',
+    thinking:    true,
+    temperature: 0.6,
+    max_tokens:  16384,
+    top_p:       0.9,
+    aliases:     ['deepseek-v4-pro', 'deepseek-v4', 'gpt-4o', 'gpt-4'],
+  },
+
   'minimaxai/minimax-m2.7': {
     nimId:       'minimaxai/minimax-m2.7',
     thinking:    false,
