@@ -46,6 +46,15 @@ const MODEL_REGISTRY = {
     aliases:     ['deepseek-v4-pro', 'deepseek-v4', 'gpt-4o', 'gpt-4'],
   },
 
+  'minimaxai/minimax-m2.7': {
+    nimId:       'minimaxai/minimax-m2.7',
+    thinking:    false,
+    temperature: 0.6,
+    max_tokens:  8182,
+    top_p:       0.9,
+    aliases:     ['deepseek-v4-pro', 'deepseek-v4', 'gpt-4o', 'gpt-4'],
+  },
+
   // ── Qwen 3 ──────────────────────────────────
   'qwen/qwen3-235b-a22b': {
     nimId:       'qwen/qwen3-235b-a22b',
