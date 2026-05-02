@@ -1,4 +1,4 @@
-// server.js — OpenAI-compatible multi-model proxy for NVIDIA NIM
+// server.js — Multi-model OpenAI-compatible proxy for NVIDIA NIM
 'use strict';
 
 const express = require('express');
@@ -6,7 +6,7 @@ const cors    = require('cors');
 const axios   = require('axios');
 
 // ─────────────────────────────────────────────
-//  Core config
+//  Configuration
 // ─────────────────────────────────────────────
 const PORT         = process.env.PORT         || 3000;
 const NIM_API_BASE = process.env.NIM_API_BASE || 'https://integrate.api.nvidia.com/v1';
@@ -17,124 +17,139 @@ if (!NIM_API_KEY) {
   process.exit(1);
 }
 
-// Default model when the client sends an unknown name
-const DEFAULT_MODEL = process.env.DEFAULT_MODEL || 'deepseek-ai/deepseek-v4-pro';
+// 🔥 Toggle: wrap reasoning_content in <think>…</think> in the output
+const SHOW_REASONING  = process.env.SHOW_REASONING  !== 'false'; // default ON
+// 🔥 Default fallback when the client doesn't specify a model
+const DEFAULT_MODEL   = process.env.DEFAULT_MODEL   || 'deepseek-ai/deepseek-v4-pro';
 
 // ─────────────────────────────────────────────
-//  Model registry
+//  Model Registry
+//  Each entry describes a NIM model and its capabilities.
 //
-//  Each entry describes one NIM model:
-//    nimId          — exact NIM model identifier
-//    thinking       — send chat_template_kwargs: { thinking: true }
-//    reasoningField — NIM returns reasoning in this delta/message field
-//    defaultTemp    — sensible default temperature for this model
-//    maxTokens      — safe default max_tokens
+//  Fields:
+//    nimId        — exact model string sent to the NIM API
+//    thinking     — send chat_template_kwargs.thinking=true  (DeepSeek-style)
+//    temperature  — sane default for this model
+//    max_tokens   — safe default output limit
+//    top_p        — default top_p
+//    aliases      — OpenAI / client-side names that map to this model
 // ─────────────────────────────────────────────
 const MODEL_REGISTRY = {
+
   // ── DeepSeek ────────────────────────────────
   'deepseek-ai/deepseek-v4-pro': {
-    nimId:          'deepseek-ai/deepseek-v4-pro',
-    thinking:       true,
-    reasoningField: 'reasoning_content',
-    defaultTemp:    0.6,
-    maxTokens:      16384,
-  },
-  'deepseek-ai/deepseek-r1': {
-    nimId:          'deepseek-ai/deepseek-r1',
-    thinking:       true,
-    reasoningField: 'reasoning_content',
-    defaultTemp:    0.6,
-    maxTokens:      8192,
+    nimId:       'deepseek-ai/deepseek-v4-pro',
+    thinking:    false,
+    temperature: 0.6,
+    max_tokens:  16384,
+    top_p:       0.9,
+    aliases:     ['deepseek-v4-pro', 'deepseek-v4', 'gpt-4o', 'gpt-4'],
   },
 
-  // ── Qwen ────────────────────────────────────
+  // ── Qwen 3 ──────────────────────────────────
   'qwen/qwen3-235b-a22b': {
-    nimId:          'qwen/qwen3-235b-a22b',
-    thinking:       true,
-    reasoningField: 'reasoning_content',
-    defaultTemp:    0.7,
-    maxTokens:      8192,
+    nimId:       'qwen/qwen3-235b-a22b',
+    thinking:    false,
+    temperature: 0.7,
+    max_tokens:  8192,
+    top_p:       0.9,
+    aliases:     ['qwen3-235b', 'qwen3.5-397b-a17b', 'qwen-235b'],
   },
+
   'qwen/qwen3-30b-a3b': {
-    nimId:          'qwen/qwen3-30b-a3b',
-    thinking:       true,
-    reasoningField: 'reasoning_content',
-    defaultTemp:    0.7,
-    maxTokens:      8192,
+    nimId:       'qwen/qwen3-30b-a3b',
+    thinking:    false,
+    temperature: 0.7,
+    max_tokens:  8192,
+    top_p:       0.9,
+    aliases:     ['qwen3-30b', 'qwen3-small'],
   },
+
   'qwen/qwen3-coder-480b-a35b-instruct': {
-    nimId:          'qwen/qwen3-coder-480b-a35b-instruct',
-    thinking:       false,
-    reasoningField: null,
-    defaultTemp:    0.6,
-    maxTokens:      8192,
+    nimId:       'qwen/qwen3-coder-480b-a35b-instruct',
+    thinking:    false,
+    temperature: 0.2,
+    max_tokens:  16384,
+    top_p:       0.95,
+    aliases:     ['qwen3-coder', 'qwen-coder', 'qwen3-coder-480b'],
   },
-  // User-requested alias
+
   'qwen/qwen3.5-397b-a17b': {
-    nimId:          'qwen/qwen3.5-397b-a17b',
-    thinking:       true,
-    reasoningField: 'reasoning_content',
-    defaultTemp:    0.7,
-    maxTokens:      16384,
+    nimId:       'qwen/qwen3.5-397b-a17b',
+    thinking:    true,
+    temperature: 0.6,
+    max_tokens:  16384,
+    top_p:       0.95,
+    aliases:     ['qwen3.5', 'qwen-coder', 'qwen3-coder-480b'],
   },
-
-  // ── Llama ────────────────────────────────────
+  
+  // ── Llama ───────────────────────────────────
   'nvidia/llama-3.1-nemotron-ultra-253b-v1': {
-    nimId:          'nvidia/llama-3.1-nemotron-ultra-253b-v1',
-    thinking:       true,
-    reasoningField: 'reasoning_content',
-    defaultTemp:    0.6,
-    maxTokens:      8192,
+    nimId:       'nvidia/llama-3.1-nemotron-ultra-253b-v1',
+    thinking:    false,
+    temperature: 0.7,
+    max_tokens:  8192,
+    top_p:       0.9,
+    aliases:     ['nemotron-ultra', 'llama-nemotron', 'gpt-3.5-turbo'],
   },
+
+  'meta/llama-3.3-70b-instruct': {
+    nimId:       'meta/llama-3.3-70b-instruct',
+    thinking:    false,
+    temperature: 0.7,
+    max_tokens:  8192,
+    top_p:       0.9,
+    aliases:     ['llama-3.3-70b', 'llama-70b', 'gpt-3.5-turbo-16k'],
+  },
+
+  // ── Mistral / Moonshot ───────────────────────
+  'moonshotai/kimi-k2-instruct': {
+    nimId:       'moonshotai/kimi-k2-instruct',
+    thinking:    false,
+    temperature: 0.7,
+    max_tokens:  8192,
+    top_p:       0.9,
+    aliases:     ['kimi-k2', 'moonshot-kimi'],
+  },
+
   'moonshotai/kimi-k2.6': {
-    nimId:          'moonshotai/kimi-k2.6',
-    thinking:       true,
-    reasoningField: null,
-    defaultTemp:    1.0,
-    maxTokens:      16384,
+    nimId:       'moonshotai/kimi-k2.6',
+    thinking:    true,
+    temperature: 1.0,
+    max_tokens:  16384,
+    top_p:       1.0,
+    aliases:     ['kimi-k2.6', 'moonshot-kimi'],
   },
 
-  // ── Mistral ──────────────────────────────────
-  'mistralai/mistral-large-2-instruct': {
-    nimId:          'mistralai/mistral-large-2-instruct',
-    thinking:       false,
-    reasoningField: null,
-    defaultTemp:    0.7,
-    maxTokens:      4096,
-  },
-
-  // ── OpenAI pass-through (if enabled on your NIM) ───
+  // ── OpenAI via NIM ───────────────────────────
   'openai/gpt-oss-120b': {
-    nimId:          'openai/gpt-oss-120b',
-    thinking:       false,
-    reasoningField: null,
-    defaultTemp:    0.7,
-    maxTokens:      4096,
+    nimId:       'openai/gpt-oss-120b',
+    thinking:    false,
+    temperature: 0.7,
+    max_tokens:  8192,
+    top_p:       0.9,
+    aliases:     ['gpt-oss-120b', 'claude-3-opus'],
   },
 };
 
 // ─────────────────────────────────────────────
-//  OpenAI-alias → NIM model mapping
-//
-//  Clients that hardcode OpenAI names will be
-//  routed here. Change targets to taste.
+//  Build lookup maps at startup
 // ─────────────────────────────────────────────
-const ALIAS_MAP = {
-  'moonshotai/kimi-k2.6':   'moonshotai/kimi-k2.6',
-  'deepseek-ai/deepseek-v4-pro':           'deepseek-ai/deepseek-v4-pro',
-  'qwen/qwen3.5-397b-a17b':          'qwen/qwen3.5-397b-a17b',
-  'gpt-4o-mini':     'qwen/qwen3-30b-a3b',
-  'o1':              'deepseek-ai/deepseek-r1',
-  'o1-mini':         'qwen/qwen3-30b-a3b',
-  'claude-3-haiku':  'qwen/qwen3-30b-a3b',
-  'gemini-pro':      'qwen/qwen3-235b-a22b',
-};
 
-// ─────────────────────────────────────────────
-//  Global reasoning-display toggle
-//  (per-request override via x-show-reasoning header also supported)
-// ─────────────────────────────────────────────
-const SHOW_REASONING_DEFAULT = process.env.SHOW_REASONING !== 'false'; // default ON
+// nimId → config
+const BY_NIM_ID = {};
+// any alias / nimId → config   (fast single lookup)
+const ALIAS_MAP = {};
+
+for (const config of Object.values(MODEL_REGISTRY)) {
+  BY_NIM_ID[config.nimId] = config;
+  ALIAS_MAP[config.nimId] = config;
+  for (const alias of (config.aliases ?? [])) {
+    ALIAS_MAP[alias.toLowerCase()] = config;
+  }
+}
+
+const DEFAULT_CONFIG = ALIAS_MAP[DEFAULT_MODEL.toLowerCase()] ?? Object.values(MODEL_REGISTRY)[0];
 
 // ─────────────────────────────────────────────
 //  App
@@ -148,73 +163,48 @@ app.use(express.urlencoded({ limit: '100mb', extended: true }));
 //  Helpers
 // ─────────────────────────────────────────────
 
-/**
- * Resolve an incoming model name to a registry entry.
- * Priority: exact registry match → alias → DEFAULT_MODEL.
- */
-function resolveEntry(requested) {
-  if (!requested) return MODEL_REGISTRY[DEFAULT_MODEL];
-
-  // 1. Exact match in registry
-  if (MODEL_REGISTRY[requested]) return MODEL_REGISTRY[requested];
-
-  // 2. Alias mapping
-  const aliased = ALIAS_MAP[requested];
-  if (aliased && MODEL_REGISTRY[aliased]) return MODEL_REGISTRY[aliased];
-
-  // 3. Partial/case-insensitive match (e.g. "deepseek-v4-pro" → full NIM id)
-  const lower = requested.toLowerCase();
-  const partialKey = Object.keys(MODEL_REGISTRY).find(k => k.toLowerCase().includes(lower));
-  if (partialKey) {
-    console.warn(`[proxy] Partial match "${requested}" → "${partialKey}"`);
-    return MODEL_REGISTRY[partialKey];
+/** Resolve an incoming model name → registry config. */
+function resolveConfig(requested) {
+  if (!requested) return DEFAULT_CONFIG;
+  const config = ALIAS_MAP[requested.toLowerCase()] ?? ALIAS_MAP[requested];
+  if (!config) {
+    console.warn(`[proxy] Unknown model "${requested}" — falling back to ${DEFAULT_CONFIG.nimId}`);
+    return DEFAULT_CONFIG;
   }
-
-  // 4. Fallback
-  console.warn(`[proxy] Unknown model "${requested}" — falling back to ${DEFAULT_MODEL}`);
-  return MODEL_REGISTRY[DEFAULT_MODEL];
+  return config;
 }
 
-/** Build the NIM request body. */
-function buildNimRequest(reqBody, entry) {
-  const { messages, temperature, max_tokens, top_p, stream } = reqBody;
+/** Build the NIM request body, merging per-model defaults. */
+function buildNimRequest(body) {
+  const { model, messages, temperature, max_tokens, top_p, stream } = body;
+  const cfg = resolveConfig(model);
 
-  const body = {
-    model:       entry.nimId,
+  const request = {
+    model:       cfg.nimId,
     messages,
-    temperature: temperature ?? entry.defaultTemp,
-    max_tokens:  max_tokens  ?? entry.maxTokens,
-    top_p:       top_p       ?? 0.9,
+    temperature: temperature ?? cfg.temperature,
+    max_tokens:  max_tokens  ?? cfg.max_tokens,
+    top_p:       top_p       ?? cfg.top_p,
     stream:      stream      ?? false,
   };
 
-  if (entry.thinking) {
-    body.extra_body = { chat_template_kwargs: { thinking: true } };
+  if (cfg.thinking) {
+    request.extra_body = { chat_template_kwargs: { thinking: true } };
   }
 
-  return body;
+  return { request, cfg };
 }
 
 /** Merge reasoning + content for non-streaming responses. */
-function mergeContent(reasoning, content, showReasoning) {
-  if (!showReasoning || !reasoning) return content || '';
-  return `<think>\n${reasoning}\n</think>\n\n${content || ''}`;
+function mergeContent(reasoningContent, content) {
+  if (!SHOW_REASONING || !reasoningContent) return content || '';
+  return `<think>\n${reasoningContent}\n</think>\n\n${content || ''}`;
 }
 
 const nimHeaders = () => ({
-  Authorization:  `Bearer ${NIM_API_KEY}`,
+  Authorization: `Bearer ${NIM_API_KEY}`,
   'Content-Type': 'application/json',
 });
-
-function makeStreamChunk(model, content) {
-  return {
-    id:      `chatcmpl-inject-${Date.now()}`,
-    object:  'chat.completion.chunk',
-    created: Math.floor(Date.now() / 1000),
-    model,
-    choices: [{ index: 0, delta: { content }, finish_reason: null }],
-  };
-}
 
 // ─────────────────────────────────────────────
 //  Routes
@@ -222,65 +212,49 @@ function makeStreamChunk(model, content) {
 
 app.get('/health', (_req, res) => {
   res.json({
-    status:           'ok',
-    service:          'NVIDIA NIM Multi-Model Proxy',
-    default_model:    DEFAULT_MODEL,
-    show_reasoning:   SHOW_REASONING_DEFAULT,
-    available_models: Object.keys(MODEL_REGISTRY),
+    status:          'ok',
+    service:         'NVIDIA NIM Multi-Model Proxy',
+    default_model:   DEFAULT_CONFIG.nimId,
+    show_reasoning:  SHOW_REASONING,
+    models_loaded:   Object.keys(MODEL_REGISTRY).length,
   });
 });
 
-/** List all known models (registry + aliases) in OpenAI format. */
 app.get('/v1/models', (_req, res) => {
+  // Expose every nimId + every alias as a separate model entry
   const seen = new Set();
   const data = [];
 
-  // Registry entries
-  for (const [key, entry] of Object.entries(MODEL_REGISTRY)) {
-    if (seen.has(key)) continue;
-    seen.add(key);
-    data.push({
-      id:       key,
-      object:   'model',
-      created:  Math.floor(Date.now() / 1000),
-      owned_by: 'nvidia-nim-proxy',
-      root:     entry.nimId,
-      metadata: { thinking: entry.thinking },
-    });
-  }
-
-  // Alias entries
-  for (const [alias, target] of Object.entries(ALIAS_MAP)) {
-    if (seen.has(alias)) continue;
-    seen.add(alias);
-    data.push({
-      id:       alias,
-      object:   'model',
-      created:  Math.floor(Date.now() / 1000),
-      owned_by: 'nvidia-nim-proxy',
-      root:     target,
-    });
+  for (const cfg of Object.values(MODEL_REGISTRY)) {
+    const ids = [cfg.nimId, ...(cfg.aliases ?? [])];
+    for (const id of ids) {
+      if (seen.has(id)) continue;
+      seen.add(id);
+      data.push({
+        id,
+        object:     'model',
+        created:    Math.floor(Date.now() / 1000),
+        owned_by:   'nvidia-nim-proxy',
+        root:       cfg.nimId,
+        thinking:   cfg.thinking,
+      });
+    }
   }
 
   res.json({ object: 'list', data });
 });
 
 // ─────────────────────────────────────────────
-//  Main proxy
+//  Main proxy endpoint
 // ─────────────────────────────────────────────
 app.post('/v1/chat/completions', async (req, res) => {
   const { stream = false } = req.body;
 
-  // Per-request reasoning toggle via header (overrides env default)
-  const showReasoning = req.headers['x-show-reasoning'] !== undefined
-    ? req.headers['x-show-reasoning'] !== 'false'
-    : SHOW_REASONING_DEFAULT;
-
-  const entry      = resolveEntry(req.body.model);
-  const nimRequest = buildNimRequest(req.body, entry);
-  const reasoningField = entry.reasoningField; // null for non-thinking models
-
   try {
+    const { request: nimRequest, cfg } = buildNimRequest(req.body);
+
+    console.log(`[proxy] ${req.body.model ?? '(none)'} → ${nimRequest.model} | stream=${stream} | thinking=${cfg.thinking}`);
+
     const upstream = await axios.post(
       `${NIM_API_BASE}/chat/completions`,
       nimRequest,
@@ -310,10 +284,7 @@ app.post('/v1/chat/completions', async (req, res) => {
           if (!line.startsWith('data: ')) continue;
           const payload = line.slice(6).trim();
 
-          if (payload === '[DONE]') {
-            res.write('data: [DONE]\n\n');
-            continue;
-          }
+          if (payload === '[DONE]') { res.write('data: [DONE]\n\n'); continue; }
 
           let data;
           try { data = JSON.parse(payload); }
@@ -322,32 +293,23 @@ app.post('/v1/chat/completions', async (req, res) => {
           const delta = data.choices?.[0]?.delta;
           if (!delta) { res.write(`data: ${JSON.stringify(data)}\n\n`); continue; }
 
-          // Extract reasoning chunk (only relevant if model supports it)
-          const reasoning = reasoningField ? (delta[reasoningField] ?? '') : '';
-          const content   = delta.content ?? '';
+          const reasoning = delta.reasoning_content ?? '';
+          const content   = delta.content           ?? '';
+          delete delta.reasoning_content;
 
-          // Strip all non-standard fields before forwarding
-          if (reasoningField) delete delta[reasoningField];
-
-          if (reasoning || content) {
-            if (showReasoning && reasoning) {
-              let out = '';
+          if (SHOW_REASONING && cfg.thinking) {
+            let out = '';
+            if (reasoning) {
               if (!thinkOpen) { out += '<think>\n'; thinkOpen = true; }
               out += reasoning;
-              if (content) { out += '\n</think>\n\n' + content; thinkOpen = false; }
-              delta.content = out;
-            } else if (content) {
-              // Close open think block when content starts arriving
-              if (thinkOpen && showReasoning) {
-                delta.content = '\n</think>\n\n' + content;
-                thinkOpen = false;
-              } else {
-                delta.content = content;
-              }
-            } else {
-              // Pure reasoning chunk, not shown
-              delta.content = showReasoning ? reasoning : '';
             }
+            if (content) {
+              if (thinkOpen) { out += '\n</think>\n\n'; thinkOpen = false; }
+              out += content;
+            }
+            delta.content = out;
+          } else {
+            delta.content = content;
           }
 
           res.write(`data: ${JSON.stringify(data)}\n\n`);
@@ -355,48 +317,40 @@ app.post('/v1/chat/completions', async (req, res) => {
       });
 
       upstream.data.on('end', () => {
-        if (thinkOpen && showReasoning) {
-          const closing = makeStreamChunk(entry.nimId, '\n</think>\n\n');
+        if (thinkOpen && SHOW_REASONING) {
+          const closing = makeStreamChunk(nimRequest.model, '\n</think>\n\n');
           res.write(`data: ${JSON.stringify(closing)}\n\n`);
         }
         res.write('data: [DONE]\n\n');
         res.end();
       });
 
-      upstream.data.on('error', (err) => {
-        console.error('[stream error]', err.message);
-        res.end();
-      });
-
+      upstream.data.on('error', (err) => { console.error('[stream error]', err.message); res.end(); });
       res.on('close', () => upstream.data.destroy?.());
 
-    // ── Non-streaming ───────────────────────────────────────────────
+    // ── Non-streaming ────────────────────────────────────────────────
     } else {
       const nimData = upstream.data;
 
-      const choices = (nimData.choices ?? []).map((choice, idx) => {
-        const reasoning = reasoningField ? (choice.message?.[reasoningField] ?? '') : '';
-        return {
-          index: idx,
-          message: {
-            role:    choice.message.role,
-            content: mergeContent(reasoning, choice.message.content, showReasoning),
-          },
-          finish_reason: choice.finish_reason ?? 'stop',
-        };
-      });
+      const choices = (nimData.choices ?? []).map((choice, idx) => ({
+        index: idx,
+        message: {
+          role: choice.message.role,
+          content: mergeContent(
+            cfg.thinking ? choice.message.reasoning_content : null,
+            choice.message.content
+          ),
+        },
+        finish_reason: choice.finish_reason ?? 'stop',
+      }));
 
       res.json({
         id:      `chatcmpl-${Date.now()}`,
         object:  'chat.completion',
         created: Math.floor(Date.now() / 1000),
-        model:   req.body.model ?? entry.nimId,
+        model:   req.body.model ?? nimRequest.model,
         choices,
-        usage:   nimData.usage ?? {
-          prompt_tokens:     0,
-          completion_tokens: 0,
-          total_tokens:      0,
-        },
+        usage:   nimData.usage ?? { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
       });
     }
 
@@ -407,7 +361,7 @@ app.post('/v1/chat/completions', async (req, res) => {
       ?? err.message
       ?? 'Internal proxy error';
 
-    console.error(`[proxy error] ${status} (${entry.nimId}): ${message}`);
+    console.error(`[proxy error] ${status}: ${message}`);
 
     res.status(status).json({
       error: {
@@ -416,34 +370,41 @@ app.post('/v1/chat/completions', async (req, res) => {
              : status >= 500  ? 'api_error'
              :                  'invalid_request_error',
         code:  status,
-        model: entry.nimId,
       },
     });
   }
 });
 
-// ─────────────────────────────────────────────
-//  404 catch-all
-// ─────────────────────────────────────────────
+// 404 catch-all
 app.all('*', (req, res) => {
   res.status(404).json({
-    error: {
-      message: `Endpoint ${req.method} ${req.path} not supported`,
-      type:    'invalid_request_error',
-      code:    404,
-    },
+    error: { message: `Endpoint ${req.method} ${req.path} not supported`, type: 'invalid_request_error', code: 404 },
   });
 });
+
+// ─────────────────────────────────────────────
+//  Utilities
+// ─────────────────────────────────────────────
+function makeStreamChunk(model, content) {
+  return {
+    id: `chatcmpl-inject-${Date.now()}`, object: 'chat.completion.chunk',
+    created: Math.floor(Date.now() / 1000), model,
+    choices: [{ index: 0, delta: { content }, finish_reason: null }],
+  };
+}
 
 // ─────────────────────────────────────────────
 //  Boot
 // ─────────────────────────────────────────────
 app.listen(PORT, () => {
-  const modelList = Object.keys(MODEL_REGISTRY).join('\n    ');
   console.log(`\n🚀  NVIDIA NIM Multi-Model Proxy — port ${PORT}`);
-  console.log(`    Default model  : ${DEFAULT_MODEL}`);
-  console.log(`    Show reasoning : ${SHOW_REASONING_DEFAULT ? '✅ ON' : '❌ OFF'} (override per-request via x-show-reasoning header)`);
-  console.log(`\n    Registered models:\n    ${modelList}\n`);
-  console.log(`    Health check   : http://localhost:${PORT}/health`);
-  console.log(`    Model list     : http://localhost:${PORT}/v1/models\n`);
+  console.log(`    Default model  : ${DEFAULT_CONFIG.nimId}`);
+  console.log(`    Show reasoning : ${SHOW_REASONING ? '✅ ON' : '❌ OFF'}`);
+  console.log(`    Registered     : ${Object.keys(MODEL_REGISTRY).length} models`);
+  for (const cfg of Object.values(MODEL_REGISTRY)) {
+    const think = cfg.thinking ? ' 🧠' : '';
+    console.log(`      · ${cfg.nimId}${think}`);
+    if (cfg.aliases?.length) console.log(`          aliases: ${cfg.aliases.join(', ')}`);
+  }
+  console.log(`    Health check   : http://localhost:${PORT}/health\n`);
 });
