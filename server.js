@@ -120,16 +120,12 @@ const MODEL_REGISTRY = {
 //  routed here. Change targets to taste.
 // ─────────────────────────────────────────────
 const ALIAS_MAP = {
-  'gpt-3.5-turbo':   'moonshotai/kimi-k2.6',
-  'gpt-4':           'deepseek-ai/deepseek-v4-pro',
-  'gpt-4-turbo':     'deepseek-ai/deepseek-v4-pro',
-  'gpt-4o':          'deepseek-ai/deepseek-v4-pro',
+  'moonshotai/kimi-k2.6':   'moonshotai/kimi-k2.6',
+  'deepseek-ai/deepseek-v4-pro':           'deepseek-ai/deepseek-v4-pro',
+  'qwen/qwen3.5-397b-a17b':          'qwen/qwen3.5-397b-a17b',
   'gpt-4o-mini':     'qwen/qwen3-30b-a3b',
   'o1':              'deepseek-ai/deepseek-r1',
   'o1-mini':         'qwen/qwen3-30b-a3b',
-  'o3':              'deepseek-ai/deepseek-v4-pro',
-  'claude-3-opus':   'nvidia/llama-3.1-nemotron-ultra-253b-v1',
-  'claude-3-sonnet': 'deepseek-ai/deepseek-v4-pro',
   'claude-3-haiku':  'qwen/qwen3-30b-a3b',
   'gemini-pro':      'qwen/qwen3-235b-a22b',
 };
