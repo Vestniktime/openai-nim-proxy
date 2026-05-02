@@ -39,7 +39,7 @@ const MODEL_REGISTRY = {
   // ── DeepSeek ────────────────────────────────
   'deepseek-ai/deepseek-v4-pro': {
     nimId:       'deepseek-ai/deepseek-v4-pro',
-    thinking:    false,
+    thinking:    true,
     temperature: 0.6,
     max_tokens:  16384,
     top_p:       0.9,
