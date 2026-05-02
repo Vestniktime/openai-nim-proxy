@@ -261,7 +261,7 @@ app.post('/v1/chat/completions', async (req, res) => {
       {
         headers:      nimHeaders(),
         responseType: stream ? 'stream' : 'json',
-        timeout:      stream ? 0 : 120_000,
+        timeout:      stream ? 0 : 600_000,
       }
     );
 
