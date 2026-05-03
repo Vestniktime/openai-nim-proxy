@@ -1,4 +1,6 @@
 // server.js — Multi-model OpenAI-compatible proxy for NVIDIA NIM
+// Key fix: non-streaming requests are fulfilled via an internal stream
+//          to avoid NIM gateway 504 on cold-starting large models.
 'use strict';
 
 const express = require('express');
@@ -17,62 +19,137 @@ if (!NIM_API_KEY) {
   process.exit(1);
 }
 
-const SHOW_REASONING = process.env.SHOW_REASONING !== 'false';
+const SHOW_REASONING = process.env.SHOW_REASONING !== 'false'; // default ON
 const DEFAULT_MODEL  = process.env.DEFAULT_MODEL  || 'deepseek-ai/deepseek-v4-pro';
-const MAX_RETRIES    = parseInt(process.env.MAX_RETRIES    || '3',      10);
-const RETRY_DELAY_MS = parseInt(process.env.RETRY_DELAY_MS || '2000',   10);
-const CONNECT_TIMEOUT  = parseInt(process.env.CONNECT_TIMEOUT  || '15000',  10);
-const RESPONSE_TIMEOUT = parseInt(process.env.RESPONSE_TIMEOUT || '300000', 10);
+
+// For non-stream requests we open an internal stream.
+// STREAM_TIMEOUT is the max time we'll wait for the *entire* streamed response.
+const STREAM_TIMEOUT   = parseInt(process.env.STREAM_TIMEOUT   || '600000', 10); // 10 min
+const CONNECT_TIMEOUT  = parseInt(process.env.CONNECT_TIMEOUT  || '15000',  10); // 15 s
+
+const MAX_RETRIES    = parseInt(process.env.MAX_RETRIES    || '3',    10);
+const RETRY_DELAY_MS = parseInt(process.env.RETRY_DELAY_MS || '3000', 10);
 
 const RETRYABLE_STATUSES = new Set([429, 500, 502, 503, 504]);
 
 // ─────────────────────────────────────────────
-//  Model Registry
+//  Model Registry  (trimmed to your account)
 // ─────────────────────────────────────────────
 const MODEL_REGISTRY = {
+
+  // ── DeepSeek ────────────────────────────────
   'deepseek-ai/deepseek-v4-pro': {
     nimId: 'deepseek-ai/deepseek-v4-pro', thinking: true,
-    temperature: 0.6, max_tokens: 8192, top_p: 0.9, timeout: 300_000,
+    temperature: 0.6, max_tokens: 8192, top_p: 0.9,
     aliases: ['deepseek-v4-pro', 'deepseek-v4', 'gpt-4o', 'gpt-4'],
   },
-  'qwen/qwen3-235b-a22b': {
-    nimId: 'qwen/qwen3-235b-a22b', thinking: false,
-    temperature: 0.7, max_tokens: 8192, top_p: 0.9, timeout: 240_000,
-    aliases: ['qwen3-235b', 'qwen3.5-397b-a17b', 'qwen-235b', 'qwen3'],
+  'deepseek-ai/deepseek-v4-flash': {
+    nimId: 'deepseek-ai/deepseek-v4-flash', thinking: true,
+    temperature: 0.6, max_tokens: 8192, top_p: 0.9,
+    aliases: ['deepseek-v4-flash', 'deepseek-flash'],
   },
-  'qwen/qwen3-30b-a3b': {
-    nimId: 'qwen/qwen3-30b-a3b', thinking: false,
-    temperature: 0.7, max_tokens: 8192, top_p: 0.9, timeout: 120_000,
-    aliases: ['qwen3-30b', 'qwen3-small'],
+  'deepseek-ai/deepseek-v3.2': {
+    nimId: 'deepseek-ai/deepseek-v3.2', thinking: false,
+    temperature: 0.6, max_tokens: 8192, top_p: 0.9,
+    aliases: ['deepseek-v3', 'deepseek-v3.2'],
+  },
+
+  // ── Qwen ────────────────────────────────────
+  'qwen/qwen3.5-397b-a17b': {
+    nimId: 'qwen/qwen3.5-397b-a17b', thinking: false,
+    temperature: 0.7, max_tokens: 8192, top_p: 0.9,
+    aliases: ['qwen3.5-397b', 'qwen3.5', 'qwen-large'],
+  },
+  'qwen/qwen3.5-122b-a10b': {
+    nimId: 'qwen/qwen3.5-122b-a10b', thinking: false,
+    temperature: 0.7, max_tokens: 8192, top_p: 0.9,
+    aliases: ['qwen3.5-122b', 'qwen-mid'],
   },
   'qwen/qwen3-coder-480b-a35b-instruct': {
     nimId: 'qwen/qwen3-coder-480b-a35b-instruct', thinking: false,
-    temperature: 0.2, max_tokens: 16384, top_p: 0.95, timeout: 300_000,
+    temperature: 0.2, max_tokens: 16384, top_p: 0.95,
     aliases: ['qwen3-coder', 'qwen-coder', 'qwen3-coder-480b'],
   },
-  'nvidia/llama-3.1-nemotron-ultra-253b-v1': {
-    nimId: 'nvidia/llama-3.1-nemotron-ultra-253b-v1', thinking: false,
-    temperature: 0.7, max_tokens: 8192, top_p: 0.9, timeout: 240_000,
-    aliases: ['nemotron-ultra', 'llama-nemotron', 'gpt-3.5-turbo'],
+  'qwen/qwen3-next-80b-a3b-thinking': {
+    nimId: 'qwen/qwen3-next-80b-a3b-thinking', thinking: false, // uses /think token natively
+    temperature: 0.7, max_tokens: 8192, top_p: 0.9,
+    aliases: ['qwen3-thinking', 'qwen3-80b-thinking'],
   },
+  'qwen/qwen3-next-80b-a3b-instruct': {
+    nimId: 'qwen/qwen3-next-80b-a3b-instruct', thinking: false,
+    temperature: 0.7, max_tokens: 8192, top_p: 0.9,
+    aliases: ['qwen3-80b', 'qwen3-instruct'],
+  },
+
+  // ── Llama ────────────────────────────────────
   'meta/llama-3.3-70b-instruct': {
     nimId: 'meta/llama-3.3-70b-instruct', thinking: false,
-    temperature: 0.7, max_tokens: 8192, top_p: 0.9, timeout: 120_000,
-    aliases: ['llama-3.3-70b', 'llama-70b', 'gpt-3.5-turbo-16k'],
+    temperature: 0.7, max_tokens: 8192, top_p: 0.9,
+    aliases: ['llama-3.3-70b', 'llama-70b', 'gpt-3.5-turbo'],
   },
+  'meta/llama-3.1-405b-instruct': {
+    nimId: 'meta/llama-3.1-405b-instruct', thinking: false,
+    temperature: 0.7, max_tokens: 8192, top_p: 0.9,
+    aliases: ['llama-405b', 'llama-3.1-405b'],
+  },
+  'meta/llama-4-maverick-17b-128e-instruct': {
+    nimId: 'meta/llama-4-maverick-17b-128e-instruct', thinking: false,
+    temperature: 0.7, max_tokens: 8192, top_p: 0.9,
+    aliases: ['llama-4-maverick', 'llama4', 'gpt-3.5-turbo-16k'],
+  },
+
+  // ── NVIDIA Nemotron ──────────────────────────
+  'nvidia/llama-3.1-nemotron-ultra-253b-v1': {
+    nimId: 'nvidia/llama-3.1-nemotron-ultra-253b-v1', thinking: false,
+    temperature: 0.7, max_tokens: 8192, top_p: 0.9,
+    aliases: ['nemotron-ultra', 'llama-nemotron-ultra'],
+  },
+  'nvidia/llama-3.3-nemotron-super-49b-v1': {
+    nimId: 'nvidia/llama-3.3-nemotron-super-49b-v1', thinking: false,
+    temperature: 0.7, max_tokens: 8192, top_p: 0.9,
+    aliases: ['nemotron-super', 'nemotron-49b'],
+  },
+
+  // ── Mistral ──────────────────────────────────
+  'mistralai/mistral-large-3-675b-instruct-2512': {
+    nimId: 'mistralai/mistral-large-3-675b-instruct-2512', thinking: false,
+    temperature: 0.7, max_tokens: 8192, top_p: 0.9,
+    aliases: ['mistral-large-3', 'mistral-large', 'claude-3-opus'],
+  },
+  'mistralai/mistral-medium-3.5-128b': {
+    nimId: 'mistralai/mistral-medium-3.5-128b', thinking: false,
+    temperature: 0.7, max_tokens: 8192, top_p: 0.9,
+    aliases: ['mistral-medium', 'mistral-medium-3.5'],
+  },
+
+  // ── Moonshot Kimi ────────────────────────────
   'moonshotai/kimi-k2-instruct': {
     nimId: 'moonshotai/kimi-k2-instruct', thinking: false,
-    temperature: 0.7, max_tokens: 8192, top_p: 0.9, timeout: 180_000,
+    temperature: 0.7, max_tokens: 8192, top_p: 0.9,
     aliases: ['kimi-k2', 'moonshot-kimi'],
   },
+  'moonshotai/kimi-k2-thinking': {
+    nimId: 'moonshotai/kimi-k2-thinking', thinking: false,
+    temperature: 0.7, max_tokens: 8192, top_p: 0.9,
+    aliases: ['kimi-k2-thinking', 'kimi-thinking'],
+  },
+
+  // ── OpenAI via NIM ───────────────────────────
   'openai/gpt-oss-120b': {
     nimId: 'openai/gpt-oss-120b', thinking: false,
-    temperature: 0.7, max_tokens: 8192, top_p: 0.9, timeout: 180_000,
-    aliases: ['gpt-oss-120b', 'claude-3-opus'],
+    temperature: 0.7, max_tokens: 8192, top_p: 0.9,
+    aliases: ['gpt-oss-120b'],
+  },
+  'openai/gpt-oss-20b': {
+    nimId: 'openai/gpt-oss-20b', thinking: false,
+    temperature: 0.7, max_tokens: 8192, top_p: 0.9,
+    aliases: ['gpt-oss-20b', 'claude-3-sonnet', 'claude-3-haiku'],
   },
 };
 
-// Build alias lookup
+// ─────────────────────────────────────────────
+//  Build lookup maps
+// ─────────────────────────────────────────────
 const ALIAS_MAP = {};
 for (const cfg of Object.values(MODEL_REGISTRY)) {
   ALIAS_MAP[cfg.nimId.toLowerCase()] = cfg;
@@ -103,19 +180,18 @@ function resolveConfig(requested) {
   return cfg;
 }
 
-function buildNimRequest(body) {
-  const { model, messages, temperature, max_tokens, top_p, stream } = body;
+function buildNimBody({ model, messages, temperature, max_tokens, top_p }, forceStream) {
   const cfg = resolveConfig(model);
-  const request = {
+  const body = {
     model:       cfg.nimId,
     messages,
     temperature: temperature ?? cfg.temperature,
     max_tokens:  max_tokens  ?? cfg.max_tokens,
     top_p:       top_p       ?? cfg.top_p,
-    stream:      stream      ?? false,
+    stream:      forceStream ?? false,
   };
-  if (cfg.thinking) request.extra_body = { chat_template_kwargs: { thinking: true } };
-  return { request, cfg };
+  if (cfg.thinking) body.extra_body = { chat_template_kwargs: { thinking: true } };
+  return { body, cfg };
 }
 
 function mergeContent(reasoningContent, content) {
@@ -136,34 +212,24 @@ const nimHeaders = () => ({
   'Content-Type': 'application/json',
 });
 
-/**
- * Stringify any axios error into a readable object.
- * This is the key diagnostic helper — it captures everything NIM returned.
- */
 function describeError(err) {
   return {
     message:       err.message,
-    code:          err.code,                          // ECONNABORTED, ETIMEDOUT, ENOTFOUND …
+    code:          err.code,
     http_status:   err.response?.status,
-    nim_error:     err.response?.data,                // full NIM error body
-    request_url:   err.config?.url,
-    request_model: (() => {
-      try { return JSON.parse(err.config?.data)?.model; } catch { return undefined; }
-    })(),
+    nim_error:     err.response?.data,
+    request_model: (() => { try { return JSON.parse(err.config?.data)?.model; } catch { return undefined; } })(),
   };
 }
 
 async function withRetry(fn, { maxRetries = MAX_RETRIES, baseDelay = RETRY_DELAY_MS, label = '' } = {}) {
   let lastError;
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
-    try {
-      return await fn(attempt);
-    } catch (err) {
+    try { return await fn(attempt); } catch (err) {
       lastError = err;
       const status      = err.response?.status;
       const isRetryable = !status || RETRYABLE_STATUSES.has(status);
       if (!isRetryable || attempt === maxRetries) break;
-
       let delay = Math.min(baseDelay * Math.pow(2, attempt), 30_000);
       if (status === 429) {
         const ra = parseInt(err.response?.headers?.['retry-after'] || '0', 10);
@@ -177,16 +243,63 @@ async function withRetry(fn, { maxRetries = MAX_RETRIES, baseDelay = RETRY_DELAY
 }
 
 // ─────────────────────────────────────────────
+//  Core: consume a NIM stream → assembled response object
+//  Used for both "fake non-stream" and diagnostics.
+// ─────────────────────────────────────────────
+function consumeStream(nimStream, cfg) {
+  return new Promise((resolve, reject) => {
+    let buffer      = '';
+    let thinkOpen   = false;
+    let contentAcc  = '';
+    let reasoningAcc = '';
+    let lastData    = null;
+
+    nimStream.on('data', (raw) => {
+      buffer += raw.toString();
+      const lines = buffer.split('\n');
+      buffer = lines.pop() ?? '';
+
+      for (const line of lines) {
+        if (!line.startsWith('data: ')) continue;
+        const payload = line.slice(6).trim();
+        if (payload === '[DONE]') continue;
+
+        let data;
+        try { data = JSON.parse(payload); } catch { continue; }
+        lastData = data;
+
+        const delta = data.choices?.[0]?.delta ?? {};
+        if (delta.reasoning_content) reasoningAcc += delta.reasoning_content;
+        if (delta.content)           contentAcc   += delta.content;
+      }
+    });
+
+    nimStream.on('end', () => {
+      resolve({
+        id:      lastData?.id      ?? `chatcmpl-${Date.now()}`,
+        created: lastData?.created ?? Math.floor(Date.now() / 1000),
+        model:   lastData?.model,
+        usage:   lastData?.usage   ?? null,
+        role:    'assistant',
+        content: contentAcc,
+        reasoning_content: reasoningAcc || null,
+        finish_reason: lastData?.choices?.[0]?.finish_reason ?? 'stop',
+      });
+    });
+
+    nimStream.on('error', reject);
+  });
+}
+
+// ─────────────────────────────────────────────
 //  Routes
 // ─────────────────────────────────────────────
 app.get('/health', (_req, res) => {
   res.json({
     status: 'ok', service: 'NVIDIA NIM Multi-Model Proxy',
-    default_model: DEFAULT_CONFIG.nimId,
-    show_reasoning: SHOW_REASONING,
+    default_model: DEFAULT_CONFIG.nimId, show_reasoning: SHOW_REASONING,
     models_loaded: Object.keys(MODEL_REGISTRY).length,
-    retry: { max: MAX_RETRIES, base_delay_ms: RETRY_DELAY_MS },
-    timeouts: { connect_ms: CONNECT_TIMEOUT, response_ms: RESPONSE_TIMEOUT },
+    stream_timeout_ms: STREAM_TIMEOUT, connect_timeout_ms: CONNECT_TIMEOUT,
   });
 });
 
@@ -204,12 +317,12 @@ app.get('/v1/models', (_req, res) => {
 });
 
 // ─────────────────────────────────────────────
-//  🔍 Diagnostic endpoint — hit /api/test in browser
+//  🔍 Diagnostic endpoint
 // ─────────────────────────────────────────────
 app.get('/api/test', async (req, res) => {
   const modelToTest = req.query.model || DEFAULT_CONFIG.nimId;
   const report = {
-    timestamp:       new Date().toISOString(),
+    timestamp: new Date().toISOString(),
     proxy_config: {
       nim_api_base:    NIM_API_BASE,
       api_key_present: !!NIM_API_KEY,
@@ -219,122 +332,99 @@ app.get('/api/test', async (req, res) => {
     steps: [],
   };
 
-  // Step 1: DNS / connectivity — can we reach NIM at all?
+  // Step 1: Connectivity
   try {
     const t0 = Date.now();
-    await axios.get(`${NIM_API_BASE}/models`, {
-      headers: nimHeaders(),
-      timeout: CONNECT_TIMEOUT,
-    });
+    await axios.get(`${NIM_API_BASE}/models`, { headers: nimHeaders(), timeout: CONNECT_TIMEOUT });
     report.steps.push({ step: '1_connectivity', status: 'ok', ms: Date.now() - t0 });
   } catch (err) {
     report.steps.push({ step: '1_connectivity', status: 'fail', detail: describeError(err) });
-    report.verdict = '❌ Cannot reach NIM API. Check network / NIM_API_BASE.';
-    return res.status(200).json(report);
+    report.verdict = '❌ Cannot reach NIM API.';
+    return res.json(report);
   }
 
-  // Step 2: Is the API key valid?
+  // Step 2: Auth + model list
+  let availableIds = [];
   try {
     const t0 = Date.now();
-    const r = await axios.get(`${NIM_API_BASE}/models`, {
-      headers: nimHeaders(),
-      timeout: CONNECT_TIMEOUT,
-    });
-    const availableIds = (r.data?.data ?? []).map(m => m.id);
+    const r = await axios.get(`${NIM_API_BASE}/models`, { headers: nimHeaders(), timeout: CONNECT_TIMEOUT });
+    availableIds = (r.data?.data ?? []).map(m => m.id);
     report.steps.push({ step: '2_auth_and_models', status: 'ok', ms: Date.now() - t0,
-                        available_model_count: availableIds.length,
-                        available_models: availableIds });
-
-    // Step 3: Is the requested model in the list?
-    if (availableIds.length > 0 && !availableIds.includes(modelToTest)) {
-      report.steps.push({
-        step: '3_model_availability', status: 'warn',
-        detail: `"${modelToTest}" not found in your account's model list.`,
-        suggestion: 'Use one of the available_models listed in step 2, or check your NIM subscription.',
-      });
-      report.verdict = `⚠️  Model "${modelToTest}" may not be available on your account.`;
-    } else {
-      report.steps.push({ step: '3_model_availability', status: 'ok', model: modelToTest });
-    }
+                        available_model_count: availableIds.length });
   } catch (err) {
     const status = err.response?.status;
-    if (status === 401 || status === 403) {
-      report.steps.push({ step: '2_auth_and_models', status: 'fail',
-                          detail: 'API key rejected (401/403). Check NIM_API_KEY.' });
-      report.verdict = '❌ Invalid API key.';
-    } else {
-      report.steps.push({ step: '2_auth_and_models', status: 'fail', detail: describeError(err) });
-      report.verdict = '❌ Auth check failed with unexpected error.';
-    }
-    return res.status(200).json(report);
+    report.steps.push({ step: '2_auth_and_models', status: 'fail', detail: describeError(err) });
+    report.verdict = (status === 401 || status === 403) ? '❌ Invalid API key.' : '❌ Auth check failed.';
+    return res.json(report);
   }
 
-  // Step 4: Tiny real inference call (max_tokens=5, no retry)
-  try {
-    const t0 = Date.now();
-    const cfg = resolveConfig(modelToTest);
-    const body = {
-      model:       cfg.nimId,
-      messages:    [{ role: 'user', content: 'Reply with the single word: OK' }],
-      max_tokens:  5,
-      temperature: 0,
-      stream:      false,
-    };
-    if (cfg.thinking) body.extra_body = { chat_template_kwargs: { thinking: true } };
+  // Step 3: Model availability
+  if (availableIds.length > 0 && !availableIds.includes(modelToTest)) {
+    report.steps.push({ step: '3_model_availability', status: 'warn',
+                        detail: `"${modelToTest}" not in your model list.` });
+  } else {
+    report.steps.push({ step: '3_model_availability', status: 'ok', model: modelToTest });
+  }
 
-    const r = await axios.post(`${NIM_API_BASE}/chat/completions`, body, {
-      headers: nimHeaders(),
-      timeout: 30_000,   // short — we just want to see if the model responds
+  // Step 4: Inference via stream (avoids cold-start 504)
+  try {
+    const t0  = Date.now();
+    const cfg = resolveConfig(modelToTest);
+    const reqBody = {
+      model: cfg.nimId,
+      messages: [{ role: 'user', content: 'Reply with the single word: OK' }],
+      max_tokens: 10, temperature: 0, stream: true,
+    };
+    if (cfg.thinking) reqBody.extra_body = { chat_template_kwargs: { thinking: true } };
+
+    const upstream = await axios.post(`${NIM_API_BASE}/chat/completions`, reqBody, {
+      headers: nimHeaders(), responseType: 'stream', timeout: CONNECT_TIMEOUT,
     });
+
+    const assembled = await Promise.race([
+      consumeStream(upstream.data, cfg),
+      new Promise((_, rej) => setTimeout(() => rej(new Error('stream_timeout')), 60_000)),
+    ]);
 
     report.steps.push({
-      step:     '4_inference',
-      status:   'ok',
-      ms:       Date.now() - t0,
-      response: r.data?.choices?.[0]?.message?.content,
+      step: '4_inference_stream', status: 'ok', ms: Date.now() - t0,
+      response: assembled.content,
+      reasoning_present: !!assembled.reasoning_content,
     });
-    report.verdict = `✅ Everything OK. Model "${modelToTest}" is reachable and responding.`;
-
+    report.verdict = `✅ Model "${modelToTest}" is working. First token in ~${Date.now() - t0}ms.`;
   } catch (err) {
-    const status = err.response?.status;
     const detail = describeError(err);
-    report.steps.push({ step: '4_inference', status: 'fail', detail });
-
-    if (status === 504 || err.code === 'ECONNABORTED') {
-      report.verdict = `⏱  Model "${modelToTest}" timed out on inference (30s limit for test). ` +
-                       `The model may be cold-starting. Try again in 30–60s, or use stream:true in real requests.`;
-    } else if (status === 404) {
-      report.verdict = `❌ Model "${modelToTest}" returned 404. It may not be deployed on your account.`;
-    } else if (status === 422) {
-      report.verdict = `❌ Request rejected (422 Unprocessable). The model may not support the extra_body thinking parameter. ` +
-                       `Try setting ENABLE_THINKING=false for this model.`;
-    } else {
-      report.verdict = `❌ Inference failed: ${status ?? err.code ?? err.message}`;
-    }
+    report.steps.push({ step: '4_inference_stream', status: 'fail', detail });
+    report.verdict = err.message === 'stream_timeout'
+      ? `⏱ Model "${modelToTest}" did not respond within 60s even via stream. It may be unavailable right now.`
+      : `❌ Inference failed: ${detail.http_status ?? err.code ?? err.message}`;
   }
 
-  res.status(200).json(report);
+  res.json(report);
 });
 
 // ─────────────────────────────────────────────
 //  Main proxy endpoint
 // ─────────────────────────────────────────────
 app.post('/v1/chat/completions', async (req, res) => {
-  const { stream = false } = req.body;
-  const { request: nimRequest, cfg } = buildNimRequest(req.body);
+  const clientWantsStream = !!req.body.stream;
+  const { body: nimBody, cfg } = buildNimBody(req.body, true); // always stream to NIM
 
-  console.log(`[proxy] ${req.body.model ?? '(none)'} → ${nimRequest.model} | stream=${stream} | thinking=${cfg.thinking}`);
+  console.log(`[proxy] ${req.body.model ?? '(none)'} → ${nimBody.model} | client_stream=${clientWantsStream} | thinking=${cfg.thinking}`);
+
+  // Helper: open a streaming connection to NIM (with retry)
+  const openUpstream = () => withRetry(
+    () => axios.post(`${NIM_API_BASE}/chat/completions`, nimBody, {
+      headers: nimHeaders(), responseType: 'stream', timeout: CONNECT_TIMEOUT,
+    }),
+    { label: nimBody.model }
+  );
 
   try {
-    if (stream) {
-      // ── Streaming ─────────────────────────────────────────────────
-      const upstream = await withRetry(
-        () => axios.post(`${NIM_API_BASE}/chat/completions`, nimRequest, {
-          headers: nimHeaders(), responseType: 'stream', timeout: CONNECT_TIMEOUT,
-        }),
-        { label: nimRequest.model }
-      );
+    const upstream = await openUpstream();
 
+    // ── Client wants a real stream ───────────────────────────────────
+    if (clientWantsStream) {
       res.setHeader('Content-Type',  'text/event-stream');
       res.setHeader('Cache-Control', 'no-cache');
       res.setHeader('Connection',    'keep-alive');
@@ -376,103 +466,65 @@ app.post('/v1/chat/completions', async (req, res) => {
 
       upstream.data.on('end', () => {
         if (thinkOpen && SHOW_REASONING) {
-          res.write(`data: ${JSON.stringify(makeStreamChunk(nimRequest.model, '\n</think>\n\n'))}\n\n`);
+          res.write(`data: ${JSON.stringify(makeStreamChunk(nimBody.model, '\n</think>\n\n'))}\n\n`);
         }
         res.write('data: [DONE]\n\n');
         res.end();
       });
-
-      upstream.data.on('error', (err) => {
-        console.error('[stream error]', describeError(err));
-        res.end();
-      });
+      upstream.data.on('error', (err) => { console.error('[stream error]', describeError(err)); res.end(); });
       res.on('close', () => upstream.data.destroy?.());
 
+    // ── Client wants normal JSON — assemble from internal stream ─────
     } else {
-      // ── Non-streaming ──────────────────────────────────────────────
-      const upstream = await withRetry(
-        (attempt) => {
-          if (attempt > 0) console.log(`[proxy] retry #${attempt} for ${nimRequest.model}`);
-          return axios.post(`${NIM_API_BASE}/chat/completions`, nimRequest, {
-            headers: nimHeaders(), responseType: 'json',
-            timeout: cfg.timeout ?? RESPONSE_TIMEOUT,
-          });
-        },
-        { label: nimRequest.model }
+      let assembled;
+      try {
+        assembled = await Promise.race([
+          consumeStream(upstream.data, cfg),
+          new Promise((_, rej) =>
+            setTimeout(() => rej(Object.assign(new Error('stream_timeout'), { code: 'STREAM_TIMEOUT' })),
+            STREAM_TIMEOUT)
+          ),
+        ]);
+      } catch (err) {
+        upstream.data.destroy?.();
+        throw err;
+      }
+
+      const fullContent = mergeContent(
+        cfg.thinking ? assembled.reasoning_content : null,
+        assembled.content
       );
 
-      const nimData = upstream.data;
-      const choices = (nimData.choices ?? []).map((choice, idx) => ({
-        index: idx,
-        message: {
-          role:    choice.message.role,
-          content: mergeContent(cfg.thinking ? choice.message.reasoning_content : null, choice.message.content),
-        },
-        finish_reason: choice.finish_reason ?? 'stop',
-      }));
-
       res.json({
-        id: `chatcmpl-${Date.now()}`, object: 'chat.completion',
-        created: Math.floor(Date.now() / 1000),
-        model:   req.body.model ?? nimRequest.model,
-        choices,
-        usage: nimData.usage ?? { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
+        id:      assembled.id,
+        object:  'chat.completion',
+        created: assembled.created,
+        model:   req.body.model ?? assembled.model ?? nimBody.model,
+        choices: [{
+          index:         0,
+          message:       { role: assembled.role, content: fullContent },
+          finish_reason: assembled.finish_reason,
+        }],
+        usage: assembled.usage ?? { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
       });
     }
 
   } catch (err) {
     const detail    = describeError(err);
     const status    = detail.http_status;
-    const isTimeout = err.code === 'ECONNABORTED' || err.code === 'ETIMEDOUT' || status === 504;
+    const isTimeout = err.code === 'ECONNABORTED' || err.code === 'ETIMEDOUT'
+                   || err.code === 'STREAM_TIMEOUT' || status === 504;
 
-    // Always log the full detail so you can see it in server logs
     console.error('[proxy error]', JSON.stringify(detail, null, 2));
 
     const message = isTimeout
-      ? `Timed out after ${MAX_RETRIES + 1} attempts. Model: ${nimRequest.model}. Try stream:true.`
-      : (detail.nim_error?.detail ?? detail.nim_error?.error?.message ?? err.message ?? 'Internal proxy error');
+      ? `Model ${nimBody.model} did not respond within the timeout. It may be overloaded — retry in a moment.`
+      : (detail.nim_error?.detail ?? detail.nim_error?.error?.message ?? err.message ?? 'Proxy error');
 
     if (res.headersSent) { res.end(); return; }
 
     res.status(status ?? (isTimeout ? 504 : 500)).json({
       error: {
         message,
-        type:     status === 429 ? 'rate_limit_error'
-                : isTimeout      ? 'timeout_error'
-                : status >= 500  ? 'api_error'
-                :                  'invalid_request_error',
-        code:     status ?? 500,
-        model:    nimRequest.model,
-        // Include full NIM error so client can see exactly what NIM said
-        nim_detail: detail.nim_error,
-        tip:      isTimeout
-                  ? 'Use stream:true, or visit /api/test to diagnose.'
-                  : 'Visit /api/test to run a full diagnostic.',
-      },
-    });
-  }
-});
-
-app.all('*', (req, res) => {
-  res.status(404).json({
-    error: { message: `Endpoint ${req.method} ${req.path} not supported`, type: 'invalid_request_error', code: 404 },
-  });
-});
-
-// ─────────────────────────────────────────────
-//  Boot
-// ─────────────────────────────────────────────
-app.listen(PORT, () => {
-  console.log(`\n🚀  NVIDIA NIM Multi-Model Proxy — port ${PORT}`);
-  console.log(`    Default model  : ${DEFAULT_CONFIG.nimId}`);
-  console.log(`    Show reasoning : ${SHOW_REASONING ? '✅ ON' : '❌ OFF'}`);
-  console.log(`    Retry          : up to ${MAX_RETRIES}x, base delay ${RETRY_DELAY_MS}ms`);
-  console.log(`    Timeouts       : connect ${CONNECT_TIMEOUT}ms / response ${RESPONSE_TIMEOUT}ms`);
-  console.log(`    Diagnostic     : http://localhost:${PORT}/api/test`);
-  console.log(`    Health         : http://localhost:${PORT}/health`);
-  console.log(`    Registered models:`);
-  for (const cfg of Object.values(MODEL_REGISTRY)) {
-    console.log(`      · ${cfg.nimId}${cfg.thinking ? ' 🧠' : ''}`);
-  }
-  console.log();
-});
+        type:       status === 429 ? 'rate_limit_error'
+                  : isTim
