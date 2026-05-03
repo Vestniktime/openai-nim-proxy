@@ -1,6 +1,6 @@
 // server.js — Multi-model OpenAI-compatible proxy for NVIDIA NIM
-// Key fix: non-streaming requests are fulfilled via an internal stream
-//          to avoid NIM gateway 504 on cold-starting large models.
+// Works on Railway, Render, Fly.io and other platforms.
+// Never calls process.exit() — all config errors are reported via HTTP.
 'use strict';
 
 const express = require('express');
@@ -12,32 +12,26 @@ const axios   = require('axios');
 // ─────────────────────────────────────────────
 const PORT         = process.env.PORT         || 3000;
 const NIM_API_BASE = process.env.NIM_API_BASE || 'https://integrate.api.nvidia.com/v1';
-const NIM_API_KEY  = process.env.NIM_API_KEY;
+const NIM_API_KEY  = process.env.NIM_API_KEY  || '';
 
+// Warn but do NOT exit — platform must stay alive so /health shows the problem.
 if (!NIM_API_KEY) {
-  console.error('[FATAL] NIM_API_KEY is not set. Exiting.');
-  process.exit(1);
+  console.warn('[warn] NIM_API_KEY is not set. All proxy requests will fail with 401 until it is added.');
 }
 
-const SHOW_REASONING = process.env.SHOW_REASONING !== 'false'; // default ON
+const SHOW_REASONING = process.env.SHOW_REASONING !== 'false';
 const DEFAULT_MODEL  = process.env.DEFAULT_MODEL  || 'deepseek-ai/deepseek-v4-pro';
-
-// For non-stream requests we open an internal stream.
-// STREAM_TIMEOUT is the max time we'll wait for the *entire* streamed response.
-const STREAM_TIMEOUT   = parseInt(process.env.STREAM_TIMEOUT   || '600000', 10); // 10 min
-const CONNECT_TIMEOUT  = parseInt(process.env.CONNECT_TIMEOUT  || '15000',  10); // 15 s
-
-const MAX_RETRIES    = parseInt(process.env.MAX_RETRIES    || '3',    10);
-const RETRY_DELAY_MS = parseInt(process.env.RETRY_DELAY_MS || '3000', 10);
+const STREAM_TIMEOUT  = parseInt(process.env.STREAM_TIMEOUT  || '600000', 10);
+const CONNECT_TIMEOUT = parseInt(process.env.CONNECT_TIMEOUT || '15000',  10);
+const MAX_RETRIES     = parseInt(process.env.MAX_RETRIES     || '3',      10);
+const RETRY_DELAY_MS  = parseInt(process.env.RETRY_DELAY_MS  || '3000',   10);
 
 const RETRYABLE_STATUSES = new Set([429, 500, 502, 503, 504]);
 
 // ─────────────────────────────────────────────
-//  Model Registry  (trimmed to your account)
+//  Model Registry
 // ─────────────────────────────────────────────
 const MODEL_REGISTRY = {
-
-  // ── DeepSeek ────────────────────────────────
   'deepseek-ai/deepseek-v4-pro': {
     nimId: 'deepseek-ai/deepseek-v4-pro', thinking: true,
     temperature: 0.6, max_tokens: 8192, top_p: 0.9,
@@ -53,8 +47,6 @@ const MODEL_REGISTRY = {
     temperature: 0.6, max_tokens: 8192, top_p: 0.9,
     aliases: ['deepseek-v3', 'deepseek-v3.2'],
   },
-
-  // ── Qwen ────────────────────────────────────
   'qwen/qwen3.5-397b-a17b': {
     nimId: 'qwen/qwen3.5-397b-a17b', thinking: false,
     temperature: 0.7, max_tokens: 8192, top_p: 0.9,
@@ -71,7 +63,7 @@ const MODEL_REGISTRY = {
     aliases: ['qwen3-coder', 'qwen-coder', 'qwen3-coder-480b'],
   },
   'qwen/qwen3-next-80b-a3b-thinking': {
-    nimId: 'qwen/qwen3-next-80b-a3b-thinking', thinking: false, // uses /think token natively
+    nimId: 'qwen/qwen3-next-80b-a3b-thinking', thinking: false,
     temperature: 0.7, max_tokens: 8192, top_p: 0.9,
     aliases: ['qwen3-thinking', 'qwen3-80b-thinking'],
   },
@@ -80,8 +72,6 @@ const MODEL_REGISTRY = {
     temperature: 0.7, max_tokens: 8192, top_p: 0.9,
     aliases: ['qwen3-80b', 'qwen3-instruct'],
   },
-
-  // ── Llama ────────────────────────────────────
   'meta/llama-3.3-70b-instruct': {
     nimId: 'meta/llama-3.3-70b-instruct', thinking: false,
     temperature: 0.7, max_tokens: 8192, top_p: 0.9,
@@ -97,8 +87,6 @@ const MODEL_REGISTRY = {
     temperature: 0.7, max_tokens: 8192, top_p: 0.9,
     aliases: ['llama-4-maverick', 'llama4', 'gpt-3.5-turbo-16k'],
   },
-
-  // ── NVIDIA Nemotron ──────────────────────────
   'nvidia/llama-3.1-nemotron-ultra-253b-v1': {
     nimId: 'nvidia/llama-3.1-nemotron-ultra-253b-v1', thinking: false,
     temperature: 0.7, max_tokens: 8192, top_p: 0.9,
@@ -109,8 +97,6 @@ const MODEL_REGISTRY = {
     temperature: 0.7, max_tokens: 8192, top_p: 0.9,
     aliases: ['nemotron-super', 'nemotron-49b'],
   },
-
-  // ── Mistral ──────────────────────────────────
   'mistralai/mistral-large-3-675b-instruct-2512': {
     nimId: 'mistralai/mistral-large-3-675b-instruct-2512', thinking: false,
     temperature: 0.7, max_tokens: 8192, top_p: 0.9,
@@ -121,8 +107,6 @@ const MODEL_REGISTRY = {
     temperature: 0.7, max_tokens: 8192, top_p: 0.9,
     aliases: ['mistral-medium', 'mistral-medium-3.5'],
   },
-
-  // ── Moonshot Kimi ────────────────────────────
   'moonshotai/kimi-k2-instruct': {
     nimId: 'moonshotai/kimi-k2-instruct', thinking: false,
     temperature: 0.7, max_tokens: 8192, top_p: 0.9,
@@ -133,8 +117,6 @@ const MODEL_REGISTRY = {
     temperature: 0.7, max_tokens: 8192, top_p: 0.9,
     aliases: ['kimi-k2-thinking', 'kimi-thinking'],
   },
-
-  // ── OpenAI via NIM ───────────────────────────
   'openai/gpt-oss-120b': {
     nimId: 'openai/gpt-oss-120b', thinking: false,
     temperature: 0.7, max_tokens: 8192, top_p: 0.9,
@@ -148,22 +130,39 @@ const MODEL_REGISTRY = {
 };
 
 // ─────────────────────────────────────────────
-//  Build lookup maps
+//  Build alias lookup
 // ─────────────────────────────────────────────
 const ALIAS_MAP = {};
 for (const cfg of Object.values(MODEL_REGISTRY)) {
   ALIAS_MAP[cfg.nimId.toLowerCase()] = cfg;
-  for (const a of (cfg.aliases ?? [])) ALIAS_MAP[a.toLowerCase()] = cfg;
+  for (const a of (cfg.aliases || [])) ALIAS_MAP[a.toLowerCase()] = cfg;
 }
-const DEFAULT_CONFIG = ALIAS_MAP[DEFAULT_MODEL.toLowerCase()] ?? Object.values(MODEL_REGISTRY)[0];
+const DEFAULT_CONFIG = ALIAS_MAP[DEFAULT_MODEL.toLowerCase()] || Object.values(MODEL_REGISTRY)[0];
 
 // ─────────────────────────────────────────────
-//  App
+//  Express app
 // ─────────────────────────────────────────────
 const app = express();
 app.use(cors());
 app.use(express.json({ limit: '100mb' }));
 app.use(express.urlencoded({ limit: '100mb', extended: true }));
+
+// ─────────────────────────────────────────────
+//  Guard middleware — rejects all proxy calls if key is missing
+// ─────────────────────────────────────────────
+function requireApiKey(req, res, next) {
+  if (!NIM_API_KEY) {
+    return res.status(401).json({
+      error: {
+        message: 'NIM_API_KEY environment variable is not configured on this server.',
+        type: 'auth_error',
+        code: 401,
+        fix: 'Add NIM_API_KEY in your platform environment variables (Railway → Variables, Render → Environment, etc.)',
+      },
+    });
+  }
+  next();
+}
 
 // ─────────────────────────────────────────────
 //  Utilities
@@ -180,15 +179,16 @@ function resolveConfig(requested) {
   return cfg;
 }
 
-function buildNimBody({ model, messages, temperature, max_tokens, top_p }, forceStream) {
+function buildNimBody(reqBody) {
+  const { model, messages, temperature, max_tokens, top_p } = reqBody;
   const cfg = resolveConfig(model);
   const body = {
     model:       cfg.nimId,
     messages,
-    temperature: temperature ?? cfg.temperature,
-    max_tokens:  max_tokens  ?? cfg.max_tokens,
-    top_p:       top_p       ?? cfg.top_p,
-    stream:      forceStream ?? false,
+    temperature: temperature !== undefined ? temperature : cfg.temperature,
+    max_tokens:  max_tokens  !== undefined ? max_tokens  : cfg.max_tokens,
+    top_p:       top_p       !== undefined ? top_p       : cfg.top_p,
+    stream:      true, // always stream to NIM to avoid 504 cold-start timeouts
   };
   if (cfg.thinking) body.extra_body = { chat_template_kwargs: { thinking: true } };
   return { body, cfg };
@@ -196,94 +196,101 @@ function buildNimBody({ model, messages, temperature, max_tokens, top_p }, force
 
 function mergeContent(reasoningContent, content) {
   if (!SHOW_REASONING || !reasoningContent) return content || '';
-  return `<think>\n${reasoningContent}\n</think>\n\n${content || ''}`;
+  return '<think>\n' + reasoningContent + '\n</think>\n\n' + (content || '');
 }
 
 function makeStreamChunk(model, content) {
   return {
-    id: `chatcmpl-inject-${Date.now()}`, object: 'chat.completion.chunk',
-    created: Math.floor(Date.now() / 1000), model,
-    choices: [{ index: 0, delta: { content }, finish_reason: null }],
+    id: 'chatcmpl-inject-' + Date.now(),
+    object: 'chat.completion.chunk',
+    created: Math.floor(Date.now() / 1000),
+    model: model,
+    choices: [{ index: 0, delta: { content: content }, finish_reason: null }],
   };
 }
 
-const nimHeaders = () => ({
-  Authorization: `Bearer ${NIM_API_KEY}`,
-  'Content-Type': 'application/json',
-});
+function nimHeaders() {
+  return {
+    Authorization:  'Bearer ' + NIM_API_KEY,
+    'Content-Type': 'application/json',
+  };
+}
 
 function describeError(err) {
   return {
-    message:       err.message,
-    code:          err.code,
-    http_status:   err.response?.status,
-    nim_error:     err.response?.data,
-    request_model: (() => { try { return JSON.parse(err.config?.data)?.model; } catch { return undefined; } })(),
+    message:     err.message,
+    code:        err.code,
+    http_status: err.response ? err.response.status : undefined,
+    nim_error:   err.response ? err.response.data   : undefined,
   };
 }
 
-async function withRetry(fn, { maxRetries = MAX_RETRIES, baseDelay = RETRY_DELAY_MS, label = '' } = {}) {
+async function withRetry(fn, opts) {
+  const maxRetries = (opts && opts.maxRetries !== undefined) ? opts.maxRetries : MAX_RETRIES;
+  const baseDelay  = (opts && opts.baseDelay  !== undefined) ? opts.baseDelay  : RETRY_DELAY_MS;
+  const label      = (opts && opts.label)                    ? opts.label      : '';
   let lastError;
+
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
-    try { return await fn(attempt); } catch (err) {
+    try {
+      return await fn(attempt);
+    } catch (err) {
       lastError = err;
-      const status      = err.response?.status;
+      const status      = err.response ? err.response.status : undefined;
       const isRetryable = !status || RETRYABLE_STATUSES.has(status);
       if (!isRetryable || attempt === maxRetries) break;
-      let delay = Math.min(baseDelay * Math.pow(2, attempt), 30_000);
+      let delay = Math.min(baseDelay * Math.pow(2, attempt), 30000);
       if (status === 429) {
-        const ra = parseInt(err.response?.headers?.['retry-after'] || '0', 10);
+        const ra = parseInt((err.response.headers && err.response.headers['retry-after']) || '0', 10);
         if (ra > 0) delay = ra * 1000;
       }
-      console.warn(`[retry] ${label} attempt ${attempt + 1}/${maxRetries} — ${status ?? err.code}. Waiting ${delay / 1000}s…`);
+      console.warn('[retry] ' + label + ' attempt ' + (attempt + 1) + '/' + maxRetries + ' — ' + (status || err.code) + '. Waiting ' + (delay / 1000) + 's…');
       await sleep(delay);
     }
   }
   throw lastError;
 }
 
-// ─────────────────────────────────────────────
-//  Core: consume a NIM stream → assembled response object
-//  Used for both "fake non-stream" and diagnostics.
-// ─────────────────────────────────────────────
-function consumeStream(nimStream, cfg) {
-  return new Promise((resolve, reject) => {
-    let buffer      = '';
-    let thinkOpen   = false;
-    let contentAcc  = '';
+// Consume a NIM SSE stream and return the fully assembled response.
+function consumeStream(nimStream) {
+  return new Promise(function(resolve, reject) {
+    let buffer       = '';
+    let contentAcc   = '';
     let reasoningAcc = '';
-    let lastData    = null;
+    let lastData     = null;
 
-    nimStream.on('data', (raw) => {
+    nimStream.on('data', function(raw) {
       buffer += raw.toString();
-      const lines = buffer.split('\n');
-      buffer = lines.pop() ?? '';
+      var lines = buffer.split('\n');
+      buffer = lines.pop() || '';
 
-      for (const line of lines) {
+      for (var i = 0; i < lines.length; i++) {
+        var line = lines[i];
         if (!line.startsWith('data: ')) continue;
-        const payload = line.slice(6).trim();
+        var payload = line.slice(6).trim();
         if (payload === '[DONE]') continue;
-
-        let data;
-        try { data = JSON.parse(payload); } catch { continue; }
-        lastData = data;
-
-        const delta = data.choices?.[0]?.delta ?? {};
-        if (delta.reasoning_content) reasoningAcc += delta.reasoning_content;
-        if (delta.content)           contentAcc   += delta.content;
+        try {
+          var data = JSON.parse(payload);
+          lastData = data;
+          var delta = data.choices && data.choices[0] && data.choices[0].delta;
+          if (delta) {
+            if (delta.reasoning_content) reasoningAcc += delta.reasoning_content;
+            if (delta.content)           contentAcc   += delta.content;
+          }
+        } catch (e) { /* skip malformed chunk */ }
       }
     });
 
-    nimStream.on('end', () => {
+    nimStream.on('end', function() {
       resolve({
-        id:      lastData?.id      ?? `chatcmpl-${Date.now()}`,
-        created: lastData?.created ?? Math.floor(Date.now() / 1000),
-        model:   lastData?.model,
-        usage:   lastData?.usage   ?? null,
-        role:    'assistant',
-        content: contentAcc,
+        id:                (lastData && lastData.id)      || ('chatcmpl-' + Date.now()),
+        created:           (lastData && lastData.created) || Math.floor(Date.now() / 1000),
+        model:             lastData && lastData.model,
+        usage:             (lastData && lastData.usage)   || null,
+        role:              'assistant',
+        content:           contentAcc,
         reasoning_content: reasoningAcc || null,
-        finish_reason: lastData?.choices?.[0]?.finish_reason ?? 'stop',
+        finish_reason:     (lastData && lastData.choices && lastData.choices[0] && lastData.choices[0].finish_reason) || 'stop',
       });
     });
 
@@ -294,110 +301,122 @@ function consumeStream(nimStream, cfg) {
 // ─────────────────────────────────────────────
 //  Routes
 // ─────────────────────────────────────────────
-app.get('/health', (_req, res) => {
+
+// Health — always responds even without a key
+app.get('/health', function(_req, res) {
   res.json({
-    status: 'ok', service: 'NVIDIA NIM Multi-Model Proxy',
-    default_model: DEFAULT_CONFIG.nimId, show_reasoning: SHOW_REASONING,
-    models_loaded: Object.keys(MODEL_REGISTRY).length,
-    stream_timeout_ms: STREAM_TIMEOUT, connect_timeout_ms: CONNECT_TIMEOUT,
+    status:           'ok',
+    service:          'NVIDIA NIM Multi-Model Proxy',
+    node_version:     process.version,
+    api_key_set:      !!NIM_API_KEY,
+    api_key_prefix:   NIM_API_KEY ? NIM_API_KEY.slice(0, 8) + '…' : null,
+    default_model:    DEFAULT_CONFIG.nimId,
+    show_reasoning:   SHOW_REASONING,
+    models_loaded:    Object.keys(MODEL_REGISTRY).length,
+    stream_timeout_s: STREAM_TIMEOUT / 1000,
+    connect_timeout_s: CONNECT_TIMEOUT / 1000,
+    diagnostic_url:   '/api/test',
   });
 });
 
-app.get('/v1/models', (_req, res) => {
-  const seen = new Set(), data = [];
-  for (const cfg of Object.values(MODEL_REGISTRY)) {
-    for (const id of [cfg.nimId, ...(cfg.aliases ?? [])]) {
+app.get('/v1/models', function(_req, res) {
+  var seen = new Set(), data = [];
+  for (var cfg of Object.values(MODEL_REGISTRY)) {
+    var ids = [cfg.nimId].concat(cfg.aliases || []);
+    for (var id of ids) {
       if (seen.has(id)) continue;
       seen.add(id);
-      data.push({ id, object: 'model', created: Math.floor(Date.now() / 1000),
+      data.push({ id: id, object: 'model', created: Math.floor(Date.now() / 1000),
                   owned_by: 'nvidia-nim-proxy', root: cfg.nimId, thinking: cfg.thinking });
     }
   }
-  res.json({ object: 'list', data });
+  res.json({ object: 'list', data: data });
 });
 
 // ─────────────────────────────────────────────
-//  🔍 Diagnostic endpoint
+//  Diagnostic endpoint
 // ─────────────────────────────────────────────
-app.get('/api/test', async (req, res) => {
-  const modelToTest = req.query.model || DEFAULT_CONFIG.nimId;
-  const report = {
-    timestamp: new Date().toISOString(),
+app.get('/api/test', async function(req, res) {
+  var modelToTest = req.query.model || DEFAULT_CONFIG.nimId;
+  var report = {
+    timestamp:    new Date().toISOString(),
+    node_version: process.version,
     proxy_config: {
       nim_api_base:    NIM_API_BASE,
-      api_key_present: !!NIM_API_KEY,
-      api_key_prefix:  NIM_API_KEY ? NIM_API_KEY.slice(0, 8) + '…' : null,
+      api_key_set:     !!NIM_API_KEY,
+      api_key_prefix:  NIM_API_KEY ? NIM_API_KEY.slice(0, 8) + '…' : '(not set)',
       default_model:   DEFAULT_CONFIG.nimId,
     },
     steps: [],
   };
 
+  if (!NIM_API_KEY) {
+    report.verdict = '❌ NIM_API_KEY is not set. Add it in your platform environment variables.';
+    return res.json(report);
+  }
+
   // Step 1: Connectivity
   try {
-    const t0 = Date.now();
-    await axios.get(`${NIM_API_BASE}/models`, { headers: nimHeaders(), timeout: CONNECT_TIMEOUT });
+    var t0 = Date.now();
+    await axios.get(NIM_API_BASE + '/models', { headers: nimHeaders(), timeout: CONNECT_TIMEOUT });
     report.steps.push({ step: '1_connectivity', status: 'ok', ms: Date.now() - t0 });
   } catch (err) {
     report.steps.push({ step: '1_connectivity', status: 'fail', detail: describeError(err) });
-    report.verdict = '❌ Cannot reach NIM API.';
+    report.verdict = '❌ Cannot reach NIM API. Check NIM_API_BASE and network.';
     return res.json(report);
   }
 
   // Step 2: Auth + model list
-  let availableIds = [];
+  var availableIds = [];
   try {
-    const t0 = Date.now();
-    const r = await axios.get(`${NIM_API_BASE}/models`, { headers: nimHeaders(), timeout: CONNECT_TIMEOUT });
-    availableIds = (r.data?.data ?? []).map(m => m.id);
-    report.steps.push({ step: '2_auth_and_models', status: 'ok', ms: Date.now() - t0,
+    var t1 = Date.now();
+    var r = await axios.get(NIM_API_BASE + '/models', { headers: nimHeaders(), timeout: CONNECT_TIMEOUT });
+    availableIds = (r.data && r.data.data ? r.data.data : []).map(function(m) { return m.id; });
+    report.steps.push({ step: '2_auth_and_models', status: 'ok', ms: Date.now() - t1,
                         available_model_count: availableIds.length });
   } catch (err) {
-    const status = err.response?.status;
+    var s = err.response && err.response.status;
     report.steps.push({ step: '2_auth_and_models', status: 'fail', detail: describeError(err) });
-    report.verdict = (status === 401 || status === 403) ? '❌ Invalid API key.' : '❌ Auth check failed.';
+    report.verdict = (s === 401 || s === 403) ? '❌ Invalid API key.' : '❌ Auth check failed.';
     return res.json(report);
   }
 
-  // Step 3: Model availability
+  // Step 3: Model in account list?
   if (availableIds.length > 0 && !availableIds.includes(modelToTest)) {
     report.steps.push({ step: '3_model_availability', status: 'warn',
-                        detail: `"${modelToTest}" not in your model list.` });
+                        detail: '"' + modelToTest + '" not found in your account model list.' });
   } else {
     report.steps.push({ step: '3_model_availability', status: 'ok', model: modelToTest });
   }
 
-  // Step 4: Inference via stream (avoids cold-start 504)
+  // Step 4: Inference via stream (bypasses cold-start 504)
   try {
-    const t0  = Date.now();
-    const cfg = resolveConfig(modelToTest);
-    const reqBody = {
+    var t2 = Date.now();
+    var cfg = resolveConfig(modelToTest);
+    var reqBody = {
       model: cfg.nimId,
       messages: [{ role: 'user', content: 'Reply with the single word: OK' }],
       max_tokens: 10, temperature: 0, stream: true,
     };
     if (cfg.thinking) reqBody.extra_body = { chat_template_kwargs: { thinking: true } };
 
-    const upstream = await axios.post(`${NIM_API_BASE}/chat/completions`, reqBody, {
+    var upstream = await axios.post(NIM_API_BASE + '/chat/completions', reqBody, {
       headers: nimHeaders(), responseType: 'stream', timeout: CONNECT_TIMEOUT,
     });
 
-    const assembled = await Promise.race([
-      consumeStream(upstream.data, cfg),
-      new Promise((_, rej) => setTimeout(() => rej(new Error('stream_timeout')), 60_000)),
+    var assembled = await Promise.race([
+      consumeStream(upstream.data),
+      new Promise(function(_, rej) { setTimeout(function() { rej(new Error('stream_timeout')); }, 60000); }),
     ]);
 
-    report.steps.push({
-      step: '4_inference_stream', status: 'ok', ms: Date.now() - t0,
-      response: assembled.content,
-      reasoning_present: !!assembled.reasoning_content,
-    });
-    report.verdict = `✅ Model "${modelToTest}" is working. First token in ~${Date.now() - t0}ms.`;
+    report.steps.push({ step: '4_inference_stream', status: 'ok', ms: Date.now() - t2,
+                        response: assembled.content, reasoning_present: !!assembled.reasoning_content });
+    report.verdict = '✅ Model "' + modelToTest + '" is working. Response in ~' + (Date.now() - t2) + 'ms.';
   } catch (err) {
-    const detail = describeError(err);
-    report.steps.push({ step: '4_inference_stream', status: 'fail', detail });
+    report.steps.push({ step: '4_inference_stream', status: 'fail', detail: describeError(err) });
     report.verdict = err.message === 'stream_timeout'
-      ? `⏱ Model "${modelToTest}" did not respond within 60s even via stream. It may be unavailable right now.`
-      : `❌ Inference failed: ${detail.http_status ?? err.code ?? err.message}`;
+      ? '⏱ Model "' + modelToTest + '" did not respond within 60s. It may be cold-starting — try again in 30s.'
+      : '❌ Inference failed: ' + (err.response && err.response.status || err.code || err.message);
   }
 
   res.json(report);
@@ -406,125 +425,92 @@ app.get('/api/test', async (req, res) => {
 // ─────────────────────────────────────────────
 //  Main proxy endpoint
 // ─────────────────────────────────────────────
-app.post('/v1/chat/completions', async (req, res) => {
-  const clientWantsStream = !!req.body.stream;
-  const { body: nimBody, cfg } = buildNimBody(req.body, true); // always stream to NIM
+app.post('/v1/chat/completions', requireApiKey, async function(req, res) {
+  var clientWantsStream = !!req.body.stream;
+  var built = buildNimBody(req.body);
+  var nimBody = built.body;
+  var cfg     = built.cfg;
 
-  console.log(`[proxy] ${req.body.model ?? '(none)'} → ${nimBody.model} | client_stream=${clientWantsStream} | thinking=${cfg.thinking}`);
-
-  // Helper: open a streaming connection to NIM (with retry)
-  const openUpstream = () => withRetry(
-    () => axios.post(`${NIM_API_BASE}/chat/completions`, nimBody, {
-      headers: nimHeaders(), responseType: 'stream', timeout: CONNECT_TIMEOUT,
-    }),
-    { label: nimBody.model }
-  );
+  console.log('[proxy] ' + (req.body.model || '(none)') + ' → ' + nimBody.model +
+              ' | client_stream=' + clientWantsStream + ' | thinking=' + cfg.thinking);
 
   try {
-    const upstream = await openUpstream();
+    var upstream = await withRetry(function() {
+      return axios.post(NIM_API_BASE + '/chat/completions', nimBody, {
+        headers: nimHeaders(), responseType: 'stream', timeout: CONNECT_TIMEOUT,
+      });
+    }, { label: nimBody.model });
 
-    // ── Client wants a real stream ───────────────────────────────────
+    // ── Client wants SSE stream ──────────────────────────────────────
     if (clientWantsStream) {
       res.setHeader('Content-Type',  'text/event-stream');
       res.setHeader('Cache-Control', 'no-cache');
       res.setHeader('Connection',    'keep-alive');
       res.flushHeaders();
 
-      let buffer = '', thinkOpen = false;
+      var buffer = '', thinkOpen = false;
 
-      upstream.data.on('data', (raw) => {
+      upstream.data.on('data', function(raw) {
         buffer += raw.toString();
-        const lines = buffer.split('\n');
-        buffer = lines.pop() ?? '';
+        var lines = buffer.split('\n');
+        buffer = lines.pop() || '';
 
-        for (const line of lines) {
+        for (var i = 0; i < lines.length; i++) {
+          var line = lines[i];
           if (!line.startsWith('data: ')) continue;
-          const payload = line.slice(6).trim();
+          var payload = line.slice(6).trim();
           if (payload === '[DONE]') { res.write('data: [DONE]\n\n'); continue; }
 
-          let data;
-          try { data = JSON.parse(payload); } catch { res.write(line + '\n'); continue; }
+          var data;
+          try { data = JSON.parse(payload); } catch (e) { res.write(line + '\n'); continue; }
 
-          const delta = data.choices?.[0]?.delta;
-          if (!delta) { res.write(`data: ${JSON.stringify(data)}\n\n`); continue; }
+          var delta = data.choices && data.choices[0] && data.choices[0].delta;
+          if (!delta) { res.write('data: ' + JSON.stringify(data) + '\n\n'); continue; }
 
-          const reasoning = delta.reasoning_content ?? '';
-          const content   = delta.content           ?? '';
+          var reasoning = delta.reasoning_content || '';
+          var content   = delta.content           || '';
           delete delta.reasoning_content;
 
           if (SHOW_REASONING && cfg.thinking) {
-            let out = '';
+            var out = '';
             if (reasoning) { if (!thinkOpen) { out += '<think>\n'; thinkOpen = true; } out += reasoning; }
             if (content)   { if (thinkOpen)  { out += '\n</think>\n\n'; thinkOpen = false; } out += content; }
             delta.content = out;
           } else {
             delta.content = content;
           }
-          res.write(`data: ${JSON.stringify(data)}\n\n`);
+          res.write('data: ' + JSON.stringify(data) + '\n\n');
         }
       });
 
-      upstream.data.on('end', () => {
+      upstream.data.on('end', function() {
         if (thinkOpen && SHOW_REASONING) {
-          res.write(`data: ${JSON.stringify(makeStreamChunk(nimBody.model, '\n</think>\n\n'))}\n\n`);
+          res.write('data: ' + JSON.stringify(makeStreamChunk(nimBody.model, '\n</think>\n\n')) + '\n\n');
         }
         res.write('data: [DONE]\n\n');
         res.end();
       });
-      upstream.data.on('error', (err) => { console.error('[stream error]', describeError(err)); res.end(); });
-      res.on('close', () => upstream.data.destroy?.());
 
-    // ── Client wants normal JSON — assemble from internal stream ─────
+      upstream.data.on('error', function(err) {
+        console.error('[stream error]', describeError(err));
+        res.end();
+      });
+
+      res.on('close', function() { if (upstream.data.destroy) upstream.data.destroy(); });
+
+    // ── Client wants JSON — assemble from internal stream ────────────
     } else {
-      let assembled;
+      var assembled;
       try {
         assembled = await Promise.race([
-          consumeStream(upstream.data, cfg),
-          new Promise((_, rej) =>
-            setTimeout(() => rej(Object.assign(new Error('stream_timeout'), { code: 'STREAM_TIMEOUT' })),
-            STREAM_TIMEOUT)
-          ),
+          consumeStream(upstream.data),
+          new Promise(function(_, rej) {
+            setTimeout(function() {
+              var e = new Error('stream_timeout');
+              e.code = 'STREAM_TIMEOUT';
+              rej(e);
+            }, STREAM_TIMEOUT);
+          }),
         ]);
       } catch (err) {
-        upstream.data.destroy?.();
-        throw err;
-      }
-
-      const fullContent = mergeContent(
-        cfg.thinking ? assembled.reasoning_content : null,
-        assembled.content
-      );
-
-      res.json({
-        id:      assembled.id,
-        object:  'chat.completion',
-        created: assembled.created,
-        model:   req.body.model ?? assembled.model ?? nimBody.model,
-        choices: [{
-          index:         0,
-          message:       { role: assembled.role, content: fullContent },
-          finish_reason: assembled.finish_reason,
-        }],
-        usage: assembled.usage ?? { prompt_tokens: 0, completion_tokens: 0, total_tokens: 0 },
-      });
-    }
-
-  } catch (err) {
-    const detail    = describeError(err);
-    const status    = detail.http_status;
-    const isTimeout = err.code === 'ECONNABORTED' || err.code === 'ETIMEDOUT'
-                   || err.code === 'STREAM_TIMEOUT' || status === 504;
-
-    console.error('[proxy error]', JSON.stringify(detail, null, 2));
-
-    const message = isTimeout
-      ? `Model ${nimBody.model} did not respond within the timeout. It may be overloaded — retry in a moment.`
-      : (detail.nim_error?.detail ?? detail.nim_error?.error?.message ?? err.message ?? 'Proxy error');
-
-    if (res.headersSent) { res.end(); return; }
-
-    res.status(status ?? (isTimeout ? 504 : 500)).json({
-      error: {
-        message,
-        type:       status === 429 ? 'rate_limit_error'
-                  : isTim
+        if (upstream.data.de
