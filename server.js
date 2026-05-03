@@ -94,7 +94,7 @@ const MODEL_REGISTRY = {
 
   'qwen/qwen3.5-397b-a17b': {
     nimId:       'qwen/qwen3.5-397b-a17b',
-    thinking:    true,
+    thinking:    false,
     temperature: 0.6,
     max_tokens:  16384,
     top_p:       0.95,
@@ -132,7 +132,7 @@ const MODEL_REGISTRY = {
 
   'moonshotai/kimi-k2.6': {
     nimId:       'moonshotai/kimi-k2.6',
-    thinking:    true,
+    thinking:    false,
     temperature: 1.0,
     max_tokens:  16384,
     top_p:       1.0,
