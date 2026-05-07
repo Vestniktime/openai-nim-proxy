@@ -33,7 +33,7 @@ if (!NIM_API_KEY) {
 var MODEL_REGISTRY = {
   'deepseek-ai/deepseek-v4-pro': {
     nimId: 'deepseek-ai/deepseek-v4-pro', thinking: true,
-    temperature: 0.6, max_tokens: 384000, top_p: 0.9,
+    temperature: 0.6, max_tokens: 16384, top_p: 0.9,
     aliases: ['deepseek-v4-pro', 'deepseek-v4', 'gpt-4o', 'gpt-4']
   },
   'deepseek-ai/deepseek-v4-flash': {
