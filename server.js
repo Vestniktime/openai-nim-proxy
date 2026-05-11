@@ -20,11 +20,11 @@ const SHOW_REASONING = false; // Set to true to show reasoning with <think> tags
 
 // 🔥 THINKING MODE TOGGLE - Enables thinking for specific models that support it
 // ⚠️ Only set to true for models that actually support chat_template_kwargs (e.g. nemotron, qwen3-thinking)
-const ENABLE_THINKING_MODE = false; // ← ИСПРАВЛЕНО: было true, вызывало 400 у большинства моделей
+const ENABLE_THINKING_MODE = true; // ← ИСПРАВЛЕНО: было true, вызывало 400 у большинства моделей
 
 // Models that support thinking mode (chat_template_kwargs)
 const THINKING_CAPABLE_MODELS = [
-  'nvidia/llama-3.1-nemotron-ultra-253b-v1',
+  'deepseek-ai/deepseek-v4-pro',
   'qwen/qwen3-next-80b-a3b-thinking',
   'qwen/qwen3-coder-480b-a35b-instruct',
 ];
@@ -34,7 +34,7 @@ const MODEL_MAPPING = {
   'gpt-3.5-turbo':  'meta/llama-3.1-8b-instruct',
   'gpt-4':          'meta/llama-3.1-70b-instruct',
   'gpt-4-turbo':    'nvidia/llama-3.1-nemotron-ultra-253b-v1',
-  'gpt-4o':         'meta/llama-3.3-70b-instruct',
+  'gpt-4o':         'deepseek-ai/deepseek-v4-pro',
   'claude-3-opus':  'meta/llama-3.1-405b-instruct',
   'claude-3-sonnet':'meta/llama-3.1-70b-instruct',
   'gemini-pro':     'mistralai/mistral-large-2-instruct',
@@ -105,8 +105,8 @@ app.post('/v1/chat/completions', async (req, res) => {
     const nimRequest = {
       model: nimModel,
       messages: messages,
-      temperature: temperature ?? 0.6,
-      max_tokens: max_tokens || 4096,
+      temperature: temperature ?? 1.0,
+      max_tokens: max_tokens || 16384,
       stream: stream || false,
       ...(useThinking ? { chat_template_kwargs: { thinking: true } } : {})
     };
