@@ -70,9 +70,9 @@ app.post('/v1/chat/completions', async (req, res) => {
   try {
     const {
       messages,
-      temperature = 0.6,
-      max_tokens  = 9024,
-      stream      = false,
+      temperature = 1.0,
+      max_tokens  = 16384,
+      stream      = true,
     } = req.body;
 
     // Build NIM request — model is always deepseek-v4-pro
