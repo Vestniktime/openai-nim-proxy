@@ -12,9 +12,9 @@ app.use(cors());
 app.use(express.json());
 
 // ─── Config ───────────────────────────────────────────────────────────────────
-const NIM_API_KEY  = process.env.NIM_API_KEY  || "";   // nvapi-xxxx
+const NIM_API_KEY  = process.env.NIM_API_KEY  || "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";   // nvapi-xxxx
 const NIM_BASE_URL = process.env.NIM_BASE_URL || "https://integrate.api.nvidia.com/v1";
-const MODEL        = process.env.MODEL        || "deepseek-ai/deepseek-r1";
+const MODEL        = process.env.MODEL        || "deepseek-ai/deepseek-v4-pro";
 
 if (!NIM_API_KEY) {
   console.error("⛔  NIM_API_KEY is not set. Create a .env file or set the env variable.");
