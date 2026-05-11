@@ -11,7 +11,7 @@ app.use(express.json());
 // ─── Конфигурация ────────────────────────────────────────────────────────────
 
 const GITHUB_TOKEN = process.env.GITHUB_TOKEN; // ваш GitHub PAT
-const MODEL        = process.env.MODEL ?? "deepseek/deepseek-v3-0324"; // замените при необходимости
+const MODEL        = process.env.MODEL ?? "deepseek-ai/deepseek-v4-pro"; // замените при необходимости
 const NIM_ENDPOINT = "https://models.github.ai/inference";             // GitHub Models → Nvidia NIM
 
 if (!GITHUB_TOKEN) {
