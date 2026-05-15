@@ -160,8 +160,8 @@ app.post('/v1/chat/completions', async (req, res) => {
     let nimModel = MODEL_MAPPING[model];
     if (!nimModel) {
       const m = model.toLowerCase();
-      if      (m.includes('deepseek-v4'))              nimModel = 'deepseek-ai/deepseek-v4-pro';
-      else if (m.includes('gpt-4') || m.includes('405b')) nimModel = 'meta/llama-3.1-405b-instruct';
+      if      (m.includes('deepseek-v4-pro'))              nimModel = 'deepseek-ai/deepseek-v4-pro';
+      else if (m.includes('deepseek-v4-flash')) nimModel = 'deepseek-ai/deepseek-v4-flash';
       else if (m.includes('claude') || m.includes('70b')) nimModel = 'meta/llama-3.1-70b-instruct';
       else                                               nimModel = 'meta/llama-3.1-8b-instruct';
     }
