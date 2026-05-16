@@ -49,6 +49,7 @@ const OPTIONAL_THINKING_MODELS = new Set([
   'qwen/qwen3-next-80b-a3b-thinking',
   'qwen/qwen3-coder-480b-a35b-instruct',
   'moonshotai/kimi-k2-instruct',
+  'mistralai/mistral-medium-3.5-128b',
 ]);
 
 const MODEL_MAPPING = {
@@ -60,7 +61,7 @@ const MODEL_MAPPING = {
   'gpt-4-turbo':       'nvidia/llama-3.1-nemotron-ultra-253b-v1',
   'claude-3-opus':     'meta/llama-3.1-405b-instruct',
   'claude-3-sonnet':   'meta/llama-3.1-70b-instruct',
-  'gemini-pro':        'mistralai/mistral-large-2-instruct',
+  'gemini-pro':        'mistralai/mistral-medium-3.5-128b',
 };
 
 // ─────────────────────────────────────────────
@@ -162,7 +163,7 @@ app.post('/v1/chat/completions', async (req, res) => {
       const m = model.toLowerCase();
       if      (m.includes('deepseek-v4-pro'))              nimModel = 'deepseek-ai/deepseek-v4-pro';
       else if (m.includes('deepseek-v4-flash')) nimModel = 'deepseek-ai/deepseek-v4-flash';
-      else if (m.includes('claude') || m.includes('70b')) nimModel = 'meta/llama-3.1-70b-instruct';
+      else if (m.includes('mistral-medium-3.5-128b')) nimModel = 'mistralai/mistral-medium-3.5-128b';
       else                                               nimModel = 'meta/llama-3.1-8b-instruct';
     }
 
