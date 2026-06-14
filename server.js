@@ -46,8 +46,7 @@ const NIM_API_BASE = process.env.NIM_API_BASE || 'https://integrate.api.nvidia.c
 const NIM_API_KEY  = process.env.NIM_API_KEY;
 
 const SHOW_REASONING  = false;
-const EFFORT_STREAM   = process.env.DEEPSEEK_REASONING_EFFORT          || 'max';
-const EFFORT_NOSTREAM = process.env.DEEPSEEK_REASONING_EFFORT_NOSTREAM || 'low';
+const EFFORT_STREAM   = process.env.DEEPSEEK_REASONING_EFFORT          || 'max'
 
 const FIRST_TOKEN_TIMEOUT = parseInt(process.env.FIRST_TOKEN_TIMEOUT || '120000');
 const IDLE_TIMEOUT        = parseInt(process.env.IDLE_TIMEOUT        || '60000');
@@ -130,7 +129,7 @@ async function callNIM(nimModel, body, effort) {
     model:       nimModel,
     messages:    body.messages,
     temperature: body.temperature ?? (isDeepSeek ? 0.6 : 0.7),
-    max_tokens:  body.max_tokens  || (isDeepSeek ? 8192 : 4096),
+    max_tokens:  body.max_tokens  || (isDeepSeek ? 16384 : 16384),
     stream:      true,
     ...buildThinkingParams(nimModel, effort),
   };
