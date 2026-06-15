@@ -152,8 +152,8 @@ async function nimRequest(nimModel, body) {
   const payload = {
     model:       nimModel,
     messages:    body.messages,
-    temperature: body.temperature ?? (isDeepSeek ? 0.6 : 0.7),
-    max_tokens:  body.max_tokens  || (isDeepSeek ? 8192 : 4096),
+    temperature: body.temperature ?? (isDeepSeek ? 1.0 : 1.0),
+    max_tokens:  body.max_tokens  || (isDeepSeek ? 16384 : 16384),
     stream:      true,
     ...thinkingParams,
   };
