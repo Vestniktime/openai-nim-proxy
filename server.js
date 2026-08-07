@@ -93,7 +93,7 @@ const MODEL_MAPPING = {
   'deepseek-v4-flash': 'deepseek-ai/deepseek-v4-flash',
   'nemotron-3-ultra-550b-a55b':     'nvidia/nemotron-3-ultra-550b-a55b',
   'thinkingmachines/inkling':             'thinkingmachines/inkling',
-  'gpt-4-turbo':       'nvidia/llama-3.1-nemotron-ultra-253b-v1',
+  'z-ai/glm-5.2':       'z-ai/glm-5.2',
   'claude-3-opus':     'meta/llama-3.1-405b-instruct',
   'claude-3-sonnet':   'meta/llama-3.1-70b-instruct',
   'gemini-pro':        'mistralai/mistral-large-2-instruct',
@@ -284,7 +284,7 @@ app.post('/v1/chat/completions', async (req, res) => {
     if (!nimModel) {
       const m = model.toLowerCase();
       if      (m.includes('deepseek-v4'))               nimModel = 'deepseek-ai/deepseek-v4-pro';
-      else if (m.includes('nvidia/nemotron-3-ultra-550b-a55b') || m.includes('405b')) nimModel = 'nvidia/nemotron-3-ultra-550b-a55b';
+      else if (m.includes('z-ai/glm-5.2') || m.includes('405b')) nimModel = 'z-ai/glm-5.2';
       else if (m.includes('thinkingmachines/inkling') || m.includes('thinkingmachines/inkling')) nimModel = 'thinkingmachines/inkling';
       else                                                nimModel = 'thinkingmachines/inkling';
     }
