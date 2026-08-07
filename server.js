@@ -72,6 +72,7 @@ const RETRYABLE_STATUSES = new Set([429, 500, 502, 503, 504]);
 const DEEPSEEK_V4_MODELS = new Set([
   'deepseek-ai/deepseek-v4-pro',
   'deepseek-ai/deepseek-v4-flash',
+  'nvidia/nemotron-3-ultra-550b-a55b',
 ]);
 
 const OPTIONAL_THINKING_MODELS = new Set([
@@ -81,7 +82,7 @@ const OPTIONAL_THINKING_MODELS = new Set([
 ]);
 
 const FALLBACK_CHAIN = {
-  'deepseek-ai/deepseek-v4-pro':   ['deepseek-ai/deepseek-v4-flash', 'meta/llama-3.1-70b-instruct'],
+  'deepseek-ai/deepseek-v4-pro':   ['deepseek-ai/deepseek-v4-flash', 'nvidia/nemotron-3-ultra-550b-a55b'],
   'deepseek-ai/deepseek-v4-flash': ['deepseek-ai/deepseek-v4-pro',   'meta/llama-3.1-70b-instruct'],
 };
 
