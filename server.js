@@ -75,7 +75,7 @@ const DEEPSEEK_V4_MODELS = new Set([
 ]);
 
 const OPTIONAL_THINKING_MODELS = new Set([
-  'nvidia/llama-3.1-nemotron-ultra-253b-v1',
+  'nvidia/nemotron-3-ultra-550b-a55b',
   'qwen/qwen3-next-80b-a3b-thinking',
   'qwen/qwen3-coder-480b-a35b-instruct',
 ]);
@@ -89,7 +89,7 @@ const MODEL_MAPPING = {
   'gpt-4o':            'deepseek-ai/deepseek-v4-pro',
   'deepseek-v4-pro':   'deepseek-ai/deepseek-v4-pro',
   'deepseek-v4-flash': 'deepseek-ai/deepseek-v4-flash',
-  'gpt-3.5-turbo':     'meta/llama-3.1-8b-instruct',
+  'nemotron-3-ultra-550b-a55b':     'nvidia/nemotron-3-ultra-550b-a55b',
   'gpt-4':             'meta/llama-3.1-70b-instruct',
   'gpt-4-turbo':       'nvidia/llama-3.1-nemotron-ultra-253b-v1',
   'claude-3-opus':     'meta/llama-3.1-405b-instruct',
