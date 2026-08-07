@@ -73,6 +73,7 @@ const DEEPSEEK_V4_MODELS = new Set([
   'deepseek-ai/deepseek-v4-pro',
   'deepseek-ai/deepseek-v4-flash',
   'nvidia/nemotron-3-ultra-550b-a55b',
+  'thinkingmachines/inkling',
 ]);
 
 const OPTIONAL_THINKING_MODELS = new Set([
@@ -91,7 +92,7 @@ const MODEL_MAPPING = {
   'deepseek-v4-pro':   'deepseek-ai/deepseek-v4-pro',
   'deepseek-v4-flash': 'deepseek-ai/deepseek-v4-flash',
   'nemotron-3-ultra-550b-a55b':     'nvidia/nemotron-3-ultra-550b-a55b',
-  'gpt-4':             'meta/llama-3.1-70b-instruct',
+  'thinkingmachines/inkling':             'thinkingmachines/inkling',
   'gpt-4-turbo':       'nvidia/llama-3.1-nemotron-ultra-253b-v1',
   'claude-3-opus':     'meta/llama-3.1-405b-instruct',
   'claude-3-sonnet':   'meta/llama-3.1-70b-instruct',
@@ -284,8 +285,8 @@ app.post('/v1/chat/completions', async (req, res) => {
       const m = model.toLowerCase();
       if      (m.includes('deepseek-v4'))               nimModel = 'deepseek-ai/deepseek-v4-pro';
       else if (m.includes('nvidia/nemotron-3-ultra-550b-a55b') || m.includes('405b')) nimModel = 'nvidia/nemotron-3-ultra-550b-a55b';
-      else if (m.includes('claude') || m.includes('70b')) nimModel = 'meta/llama-3.1-70b-instruct';
-      else                                                nimModel = 'meta/llama-3.1-8b-instruct';
+      else if (m.includes('thinkingmachines/inkling') || m.includes('thinkingmachines/inkling')) nimModel = 'thinkingmachines/inkling';
+      else                                                nimModel = 'thinkingmachines/inkling';
     }
 
     const { stream: nimStream, usedModel } = await nimRequestWithFallback(nimModel, body);
