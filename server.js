@@ -71,7 +71,7 @@ const RETRYABLE_STATUSES = new Set([429, 500, 502, 503, 504]);
 
 const DEEPSEEK_V4_MODELS = new Set([
   'deepseek-ai/deepseek-v4-pro',
-  'deepseek-ai/deepseek-v4-flash-0731,
+  'deepseek-ai/deepseek-v4-flash-0731',
   'nvidia/nemotron-3-ultra-550b-a55b',
   'thinkingmachines/inkling',
 ]);
