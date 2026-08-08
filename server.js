@@ -283,7 +283,7 @@ app.post('/v1/chat/completions', async (req, res) => {
     let nimModel = MODEL_MAPPING[model];
     if (!nimModel) {
       const m = model.toLowerCase();
-      if      (m.includes('deepseek-v4-pro'))               nimModel = 'deepseek-ai/deepseek-v4-pro';
+      if      (m.includes('pro'))               nimModel = 'deepseek-ai/deepseek-v4-pro';
       else if (m.includes('deepseek-v4-flash-0731'))        nimModel = 'deepseek-ai/deepseek-v4-flash-0731';
       else if (m.includes('thinkingmachines/inkling') || m.includes('thinkingmachines/inkling')) nimModel = 'thinkingmachines/inkling';
       else                                                nimModel = 'thinkingmachines/inkling';
