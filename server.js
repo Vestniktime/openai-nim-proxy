@@ -50,7 +50,7 @@ const SHOW_REASONING = false;
 //   'high' → Think High (умеренное рассуждение перед ответом — баланс)
 //   'max'  → Think Max  (глубокое рассуждение — самый медленный)
 // ⚠️ Именно Non-think и был причиной коротких/сухих ответов.
-const DEEPSEEK_REASONING_EFFORT = process.env.DEEPSEEK_REASONING_EFFORT || 'high';
+const DEEPSEEK_REASONING_EFFORT = process.env.DEEPSEEK_REASONING_EFFORT || 'max';
 
 const FIRST_TOKEN_TIMEOUT = parseInt(process.env.FIRST_TOKEN_TIMEOUT || '150000'); // 2.5 мин — Think High думает дольше Non-think
 const IDLE_TIMEOUT        = parseInt(process.env.IDLE_TIMEOUT        || '60000');
@@ -79,7 +79,7 @@ const RETRYABLE_STATUSES = new Set([429, 500, 502, 503, 504]);
 
 const DEEPSEEK_V4_MODELS = new Set([
   'deepseek-ai/deepseek-v4-pro',
-  'deepseek-ai/deepseek-v4-flash',
+  'deepseek-ai/deepseek-v4-flash-0731',
 ]);
 
 const OPTIONAL_THINKING_MODELS = new Set([
@@ -90,13 +90,13 @@ const OPTIONAL_THINKING_MODELS = new Set([
 
 const FALLBACK_CHAIN = {
   'deepseek-ai/deepseek-v4-pro':   ['deepseek-ai/deepseek-v4-flash', 'meta/llama-3.1-70b-instruct'],
-  'deepseek-ai/deepseek-v4-flash': ['deepseek-ai/deepseek-v4-pro',   'meta/llama-3.1-70b-instruct'],
+  'deepseek-ai/deepseek-v4-flash-0731': ['deepseek-ai/deepseek-v4-pro',   'meta/llama-3.1-70b-instruct'],
 };
 
 const MODEL_MAPPING = {
   'gpt-4o':            'deepseek-ai/deepseek-v4-pro',
   'deepseek-v4-pro':   'deepseek-ai/deepseek-v4-pro',
-  'deepseek-v4-flash': 'deepseek-ai/deepseek-v4-flash',
+  'deepseek-v4-flash-0731': 'deepseek-ai/deepseek-v4-flash-0731',
   'gpt-3.5-turbo':     'meta/llama-3.1-8b-instruct',
   'gpt-4':             'meta/llama-3.1-70b-instruct',
   'gpt-4-turbo':       'nvidia/llama-3.1-nemotron-ultra-253b-v1',
@@ -117,7 +117,7 @@ const MODEL_MAPPING = {
  */
 function buildThinkingParams(nimModel) {
   if (DEEPSEEK_V4_MODELS.has(nimModel)) {
-    const effort = (DEEPSEEK_REASONING_EFFORT || 'high').toLowerCase();
+    const effort = (DEEPSEEK_REASONING_EFFORT || 'max').toLowerCase();
 
     if (effort === 'max') {
       return { chat_template_kwargs: { enable_thinking: true, thinking: true, reasoning_effort: 'max' } };
@@ -326,7 +326,7 @@ app.post('/v1/chat/completions', async (req, res) => {
       if (m.includes('deepseek-v4')) {
         // ✅ ФИКС: раньше любая строка с "deepseek-v4" (включая flash!)
         //    ошибочно уезжала на pro. Теперь flash действительно уходит на flash.
-        nimModel = m.includes('flash') ? 'deepseek-ai/deepseek-v4-flash' : 'deepseek-ai/deepseek-v4-pro';
+        nimModel = m.includes('flash') ? 'deepseek-ai/deepseek-v4-flash-0731' : 'deepseek-ai/deepseek-v4-pro';
       } else if (m.includes('gpt-4') || m.includes('405b')) {
         nimModel = 'meta/llama-3.1-405b-instruct';
       } else if (m.includes('claude') || m.includes('70b')) {
