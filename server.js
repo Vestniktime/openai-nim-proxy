@@ -43,7 +43,7 @@ app.use((req, res, next) => {
 const NIM_API_BASE = process.env.NIM_API_BASE || 'https://integrate.api.nvidia.com/v1';
 const NIM_API_KEY  = process.env.NIM_API_KEY;
 
-const SHOW_REASONING = false;
+const SHOW_REASONING = true;
 
 // DeepSeek V4 имеет РОВНО 3 режима (официальная схема NVIDIA/vLLM):
 //   'low'  → Non-think  (модель отвечает "в лоб", без раздумий — САМЫЙ СУХОЙ режим)
@@ -83,7 +83,7 @@ const DEEPSEEK_V4_MODELS = new Set([
 ]);
 
 const OPTIONAL_THINKING_MODELS = new Set([
-  'nvidia/llama-3.1-nemotron-ultra-253b-v1',
+  'z-ai/glm-5.2',
   'qwen/qwen3-next-80b-a3b-thinking',
   'qwen/qwen3-coder-480b-a35b-instruct',
 ]);
@@ -97,7 +97,7 @@ const MODEL_MAPPING = {
   'gpt-4o':            'deepseek-ai/deepseek-v4-pro',
   'deepseek-v4-pro':   'deepseek-ai/deepseek-v4-pro',
   'deepseek-v4-flash-0731': 'deepseek-ai/deepseek-v4-flash-0731',
-  'gpt-3.5-turbo':     'meta/llama-3.1-8b-instruct',
+  'z-ai/glm-5.2':     'z-ai/glm-5.2',
   'gpt-4':             'meta/llama-3.1-70b-instruct',
   'gpt-4-turbo':       'nvidia/llama-3.1-nemotron-ultra-253b-v1',
   'claude-3-opus':     'meta/llama-3.1-405b-instruct',
@@ -327,8 +327,8 @@ app.post('/v1/chat/completions', async (req, res) => {
         // ✅ ФИКС: раньше любая строка с "deepseek-v4" (включая flash!)
         //    ошибочно уезжала на pro. Теперь flash действительно уходит на flash.
         nimModel = m.includes('flash') ? 'deepseek-ai/deepseek-v4-flash-0731' : 'deepseek-ai/deepseek-v4-pro';
-      } else if (m.includes('gpt-4') || m.includes('405b')) {
-        nimModel = 'meta/llama-3.1-405b-instruct';
+      } else if (m.includes('z-ai/glm-5.2') || m.includes('405b')) {
+        nimModel = 'z-ai/glm-5.2';
       } else if (m.includes('claude') || m.includes('70b')) {
         nimModel = 'meta/llama-3.1-70b-instruct';
       } else {
