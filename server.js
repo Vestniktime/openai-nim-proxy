@@ -80,6 +80,7 @@ const RETRYABLE_STATUSES = new Set([429, 500, 502, 503, 504]);
 const DEEPSEEK_V4_MODELS = new Set([
   'deepseek-ai/deepseek-v4-pro',
   'deepseek-ai/deepseek-v4-flash-0731',
+  'nicoboss/DeepSeek-R1-Distill-Qwen-32B-Uncensored',
 ]);
 
 const OPTIONAL_THINKING_MODELS = new Set([
@@ -98,7 +99,7 @@ const MODEL_MAPPING = {
   'deepseek-v4-pro':   'deepseek-ai/deepseek-v4-pro',
   'deepseek-v4-flash-0731': 'deepseek-ai/deepseek-v4-flash-0731',
   'z-ai/glm-5.2':     'z-ai/glm-5.2',
-  'gpt-4':             'meta/llama-3.1-70b-instruct',
+  'nicoboss/DeepSeek-R1-Distill-Qwen-32B-Uncensored':             'nicoboss/DeepSeek-R1-Distill-Qwen-32B-Uncensored',
   'gpt-4-turbo':       'nvidia/llama-3.1-nemotron-ultra-253b-v1',
   'claude-3-opus':     'meta/llama-3.1-405b-instruct',
   'claude-3-sonnet':   'meta/llama-3.1-70b-instruct',
@@ -329,8 +330,8 @@ app.post('/v1/chat/completions', async (req, res) => {
         nimModel = m.includes('flash') ? 'deepseek-ai/deepseek-v4-flash-0731' : 'deepseek-ai/deepseek-v4-pro';
       } else if (m.includes('z-ai/glm-5.2') || m.includes('405b')) {
         nimModel = 'z-ai/glm-5.2';
-      } else if (m.includes('claude') || m.includes('70b')) {
-        nimModel = 'meta/llama-3.1-70b-instruct';
+      } else if (m.includes('nicoboss/DeepSeek-R1-Distill-Qwen-32B-Uncensored') || m.includes('70b')) {
+        nimModel = 'nicoboss/DeepSeek-R1-Distill-Qwen-32B-Uncensored';
       } else {
         nimModel = 'meta/llama-3.1-8b-instruct';
       }
