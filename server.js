@@ -327,7 +327,7 @@ app.post('/v1/chat/completions', async (req, res) => {
       if (m.includes('deepseek-v4')) {
         // ✅ ФИКС: раньше любая строка с "deepseek-v4" (включая flash!)
         //    ошибочно уезжала на pro. Теперь flash действительно уходит на flash.
-        nimModel = m.includes('flash') ? 'deepseek-ai/deepseek-v4-flash-0731' : 'deepseek-ai/deepseek-v4-pro';
+        nimModel = m.includes('flash') ? 'deepseek-ai/deepseek-v4-flash-0731' : 'deepseek-ai/deepseek-v4-pro-0813';
       } else if (m.includes('deepseek-ai/deepseek-v4-pro-0813') || m.includes('405b')) {
         nimModel = 'deepseek-ai/deepseek-v4-pro-0813';
       } else if (m.includes('nicoboss/DeepSeek-R1-Distill-Qwen-32B-Uncensored') || m.includes('70b')) {
