@@ -78,7 +78,7 @@ const RETRYABLE_STATUSES = new Set([429, 500, 502, 503, 504]);
 // ─────────────────────────────────────────────
 
 const DEEPSEEK_V4_MODELS = new Set([
-  'deepseek-ai/deepseek-v4-pro',
+  'deepseek-ai/deepseek-v4-pro-0813',
   'deepseek-ai/deepseek-v4-flash-0731',
   'nicoboss/DeepSeek-R1-Distill-Qwen-32B-Uncensored',
 ]);
@@ -96,7 +96,7 @@ const FALLBACK_CHAIN = {
 
 const MODEL_MAPPING = {
   'gpt-4o':            'deepseek-ai/deepseek-v4-pro',
-  'deepseek-v4-pro':   'deepseek-ai/deepseek-v4-pro',
+  'deepseek-v4-pro':   'deepseek-ai/deepseek-v4-pro-0813',
   'deepseek-v4-flash-0731': 'deepseek-ai/deepseek-v4-flash-0731',
   'moonshotai/kimi-k2.6':     'moonshotai/kimi-k2.6',
   'nicoboss/DeepSeek-R1-Distill-Qwen-32B-Uncensored':             'nicoboss/DeepSeek-R1-Distill-Qwen-32B-Uncensored',
@@ -328,8 +328,8 @@ app.post('/v1/chat/completions', async (req, res) => {
         // ✅ ФИКС: раньше любая строка с "deepseek-v4" (включая flash!)
         //    ошибочно уезжала на pro. Теперь flash действительно уходит на flash.
         nimModel = m.includes('flash') ? 'deepseek-ai/deepseek-v4-flash-0731' : 'deepseek-ai/deepseek-v4-pro';
-      } else if (m.includes('moonshotai/kimi-k2.6') || m.includes('405b')) {
-        nimModel = 'moonshotai/kimi-k2.6';
+      } else if (m.includes('deepseek-ai/deepseek-v4-pro-0813') || m.includes('405b')) {
+        nimModel = 'deepseek-ai/deepseek-v4-pro-0813';
       } else if (m.includes('nicoboss/DeepSeek-R1-Distill-Qwen-32B-Uncensored') || m.includes('70b')) {
         nimModel = 'nicoboss/DeepSeek-R1-Distill-Qwen-32B-Uncensored';
       } else {
