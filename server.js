@@ -155,7 +155,7 @@ async function nimFetch(nimModel, body) {
     top_p:       body.top_p       ?? (isDeepSeek ? 0.95 : undefined),
     max_tokens:  isDeepSeek
       ? Math.max(body.max_tokens || 0, MIN_RESPONSE_TOKENS)
-      : (body.max_tokens || 4096),
+      : (body.max_tokens || 128000),
     stream: true,
     ...buildThinkingParams(nimModel),
   };
