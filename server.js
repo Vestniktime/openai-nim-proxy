@@ -85,7 +85,7 @@ const MODEL_MAPPING = {
   'gpt-4-turbo':       'meta/llama-3.1-405b-instruct',
   'claude-3-opus':     'meta/llama-3.1-405b-instruct',
   'claude-3-sonnet':   'meta/llama-3.1-70b-instruct',
-  'gemini-pro':        'mistralai/mistral-large-2-instruct',
+  'z-ai/glm-5.3':        'z-ai/glm-5.3',
 };
 
 // ─────────────────────────────────────────────
@@ -298,7 +298,7 @@ app.post('/v1/chat/completions', async (req, res) => {
     } else {
       const m = model.toLowerCase();
       if      (m.includes('deepseek')) nimModel = m.includes('flash') ? DEEPSEEK_V4_FLASH_ID : DEEPSEEK_V4_PRO_ID;
-      else if (m.includes('405b'))     nimModel = 'meta/llama-3.1-405b-instruct';
+      else if (m.includes('z-ai/glm-5.3'))     nimModel = 'z-ai/glm-5.3';
       else if (m.includes('70b'))      nimModel = 'meta/llama-3.1-70b-instruct';
       else                             nimModel = 'meta/llama-3.1-8b-instruct';
     }
